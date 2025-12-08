@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Light Mode (Default) */
+        --background: 248 250 252;
+        /* Slate 50 */
+        --surface: 255 255 255;
+        /* White */
+        --surface-highlight: 241 245 249;
+        /* Slate 100 */
+        --primary: 99 102 241;
+        /* Indigo 500 */
+        --primary-hover: 79 70 229;
+        /* Indigo 600 */
+        --secondary: 16 185 129;
+        /* Emerald 500 */
+        --accent: 139 92 246;
+        /* Violet 500 */
+        --danger: 239 68 68;
+        /* Red 500 */
+        --text-main: 15 23 42;
+        /* Slate 900 */
+        --text-muted: 100 116 139;
+        /* Slate 500 */
+        --text-inverted: 248 250 252;
+        /* Slate 50 */
+        --border: 226 232 240;
+        /* Slate 200 */
+    }
+
+    .dark {
+        /* Dark Mode */
+        --background: 15 23 42;
+        /* Slate 900 */
+        --surface: 30 41 59;
+        /* Slate 800 */
+        --surface-highlight: 51 65 85;
+        /* Slate 700 */
+        --primary: 99 102 241;
+        /* Indigo 500 */
+        --primary-hover: 79 70 229;
+        /* Indigo 600 */
+        --secondary: 16 185 129;
+        /* Emerald 500 */
+        --accent: 139 92 246;
+        /* Violet 500 */
+        --danger: 239 68 68;
+        /* Red 500 */
+        --text-main: 248 250 252;
+        /* Slate 50 */
+        --text-muted: 148 163 184;
+        /* Slate 400 */
+        --text-inverted: 15 23 42;
+        /* Slate 900 */
+        --border: 51 65 85;
+        /* Slate 700 */
+    }
+
+    body {
+        @apply bg-background text-text-main font-sans antialiased selection:bg-primary selection:text-white transition-colors duration-300;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        @apply font-heading font-bold tracking-tight;
+    }
+}
+
+@layer components {
+    .glass-panel {
+        @apply bg-surface/80 backdrop-blur-md border border-white/10 shadow-glass;
+    }
+
+    .btn-primary {
+        @apply bg-primary hover:bg-primaryHover text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 active:scale-95 shadow-lg shadow-primary/30;
+    }
+
+    .btn-secondary {
+        @apply bg-surface hover:bg-surfaceHighlight text-text-main border border-border font-medium py-2 px-4 rounded-lg transition-all duration-200 active:scale-95;
+    }
+
+    .btn-danger {
+        @apply bg-danger/10 hover:bg-danger/20 text-danger border border-danger/20 font-medium py-2 px-4 rounded-lg transition-all duration-200 active:scale-95;
+    }
+
+    .input-field {
+        @apply w-full bg-surface border border-border rounded-lg px-4 py-2 text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-200;
+    }
+
+    .card {
+        @apply bg-surface border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow duration-300;
+    }
+}
