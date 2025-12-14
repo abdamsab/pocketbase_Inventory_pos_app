@@ -1,0 +1,33 @@
+/// <reference path="../pb_data/types.d.ts" />
+
+/**
+ * FIX: Properly set admin role for admin user (with save)
+ *
+ * Previous migration didn't actually save the user record
+ */
+
+migrate((app) => {
+    try {
+        // Find the admin user
+        const adminUsers = app.findRecordsByFilter('_pb_users_auth_', 'email="admin@pos.com"', '', 1, 0);
+        if (adminUsers.length > 0) {
+            const adminUser = adminUsers[0];
+            console.log('🔧 PROPERLY setting admin role for user:', adminUser.get('email'));
+            console.log('Current role:', adminUser.get('role'));
+
+            // Set the role to admin and save
+            adminUser.set('role', 'admin');
+            app.save(adminUser);
+
+            // Verify it was saved
+            const verifyUser = app.findRecordsByFilter('_pb_users_auth_', 'email="admin@pos.com"', '', 1, 0)[0];
+            console.log('✅ Admin user role set to:', verifyUser.get('role'));
+        } else {
+            console.log('⚠️ Admin user not found');
+        }
+    } catch (error) {
+        console.log('❌ Error setting admin role:', error.message);
+    }
+}, (app) => {
+    // No rollback needed - this is a fix for missing data
+});

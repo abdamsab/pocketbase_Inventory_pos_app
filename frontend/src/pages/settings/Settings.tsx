@@ -1,33 +1,22 @@
 import { useSettings, useUpdateSetting } from '../../hooks/useSettings';
 import { Save, Building, Percent, DollarSign, MapPin, Phone, Mail } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export function Settings() {
     const { data: settings, isLoading } = useSettings();
     const updateSetting = useUpdateSetting();
 
-    const [formData, setFormData] = useState({
-        companyName: '',
-        address: '',
-        phone: '',
-        email: '',
-        taxRate: '0',
-        currency: 'USD',
-    });
     const [saved, setSaved] = useState(false);
 
-    useEffect(() => {
-        if (settings?.company_info) {
-            setFormData({
-                companyName: settings.company_info.name || '',
-                address: settings.company_info.address || '',
-                phone: settings.company_info.phone || '',
-                email: settings.company_info.email || '',
-                taxRate: ((settings.company_info.taxRate || 0) * 100).toString(),
-                currency: settings.company_info.currency || 'USD',
-            });
-        }
-    }, [settings]);
+    // Form data controlled by settings - no setState in useEffect needed
+    const [formData, setFormData] = useState(() => ({
+        companyName: settings?.company_info?.name || '',
+        address: settings?.company_info?.address || '',
+        phone: settings?.company_info?.phone || '',
+        email: settings?.company_info?.email || '',
+        taxRate: ((settings?.company_info?.taxRate || 0) * 100).toString(),
+        currency: settings?.company_info?.currency || 'USD',
+    }));
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

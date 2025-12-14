@@ -1,32 +1,43 @@
-import { useSuppliers, useDeleteSupplier } from '../../hooks/useSuppliers';
+import { useQuery } from '@tanstack/react-query';
+import { pb } from '../../lib/pocketbase';
 import { Plus, Search, Edit, Trash2, Building2, Mail, Phone, User } from 'lucide-react';
 import { useState } from 'react';
 import { SupplierForm } from './SupplierForm';
+import type { Supplier } from '../../types';
 
+// EXACT replica of SalesHistory.tsx pattern
 export function SupplierList() {
-    const { data: suppliers, isLoading } = useSuppliers();
-    const deleteSupplier = useDeleteSupplier();
+    const { data: suppliers, isLoading } = useQuery({
+        queryKey: ['suppliers'],
+        queryFn: async () => {
+            const result = await pb.collection('suppliers').getList(1, 100, {
+                sort: 'name',
+            });
+            return result.items;
+        },
+    });
+
     const [isFormOpen, setIsFormOpen] = useState(false);
-    const [editingSupplier, setEditingSupplier] = useState<any>(null);
+    const [editingSupplier, setEditingSupplier] = useState<Supplier | undefined>(undefined);
     const [search, setSearch] = useState('');
 
     const handleDelete = async (id: string) => {
         if (confirm('Are you sure you want to delete this supplier?')) {
-            await deleteSupplier.mutateAsync(id);
+            await pb.collection('suppliers').delete(id);
         }
     };
-
-    const filteredSuppliers = suppliers?.filter(s =>
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        s.email?.toLowerCase().includes(search.toLowerCase()) ||
-        s.phone?.toLowerCase().includes(search.toLowerCase())
-    );
 
     if (isLoading) return (
         <div className="flex items-center justify-center h-64 text-primary">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-current"></div>
         </div>
     );
+
+    const filteredSuppliers = suppliers?.filter(s =>
+        s.name.toLowerCase().includes(search.toLowerCase()) ||
+        s.email?.toLowerCase().includes(search.toLowerCase()) ||
+        s.phone?.toLowerCase().includes(search.toLowerCase())
+    ) || [];
 
     return (
         <div className="space-y-6">
@@ -36,7 +47,7 @@ export function SupplierList() {
                     <p className="text-text-muted">Manage your supplier relationships</p>
                 </div>
                 <button
-                    onClick={() => { setEditingSupplier(null); setIsFormOpen(true); }}
+                    onClick={() => { setEditingSupplier(undefined); setIsFormOpen(true); }}
                     className="btn-primary flex items-center gap-2"
                 >
                     <Plus size={20} />
@@ -46,7 +57,7 @@ export function SupplierList() {
 
             <div className="bg-surface border border-border rounded-2xl shadow-lg overflow-hidden">
                 {/* Toolbar */}
-                <div className="p-4 border-b border-border flex gap-4">
+                <div className="p-4 border-b border-border flex gap-4 items-center">
                     <div className="relative flex-1 max-w-md group">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-primary transition-colors" size={18} />
                         <input
@@ -54,8 +65,20 @@ export function SupplierList() {
                             placeholder="Search suppliers..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="w-full bg-surface border border-border rounded-lg pl-10 pr-4 py-2.5 text-text-main placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                            className="w-full bg-surface border border-border rounded-lg pl-10 pr-10 py-2.5 text-text-main placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
                         />
+                        {search && (
+                            <button
+                                onClick={() => setSearch('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main transition-colors"
+                            >
+                                ×
+                            </button>
+                        )}
+                    </div>
+                    <div className="text-sm text-text-muted">
+                        {filteredSuppliers ? `${filteredSuppliers.length} supplier${filteredSuppliers.length !== 1 ? 's' : ''}` : 'Loading...'}
+                        {search && suppliers && ` (filtered from ${suppliers.length})`}
                     </div>
                 </div>
 
@@ -105,7 +128,7 @@ export function SupplierList() {
 
                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
-                                    onClick={() => { setEditingSupplier(supplier); setIsFormOpen(true); }}
+                                    onClick={() => { setEditingSupplier(supplier as Supplier); setIsFormOpen(true); }}
                                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors text-sm font-medium"
                                 >
                                     <Edit size={14} />
@@ -125,7 +148,15 @@ export function SupplierList() {
                 {filteredSuppliers?.length === 0 && (
                     <div className="p-12 text-center text-text-muted">
                         <Building2 size={48} className="mx-auto mb-4 opacity-50" />
-                        <p>No suppliers found</p>
+                        <p>{search ? 'No suppliers match your search' : 'No suppliers found'}</p>
+                        {search && (
+                            <button
+                                onClick={() => setSearch('')}
+                                className="mt-2 text-primary hover:text-primaryHover text-sm"
+                            >
+                                Clear search
+                            </button>
+                        )}
                     </div>
                 )}
             </div>

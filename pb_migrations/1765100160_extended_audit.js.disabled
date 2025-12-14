@@ -1,0 +1,223 @@
+migrate((app) => {
+  // Create comprehensive audit log collection
+  const auditLogsCollection = new Collection({
+    name: 'audit_logs',
+    type: 'base',
+    listRule: '@request.auth.id != ""',
+    viewRule: '@request.auth.id != ""',
+    createRule: '@request.auth.id != ""',
+    updateRule: '@request.auth.role = "admin"',
+    deleteRule: '@request.auth.role = "admin"',
+    fields: [
+      {
+        name: 'action',
+        type: 'select',
+        required: true,
+        values: [
+          'create', 'update', 'delete', 'view', 'export', 'import',
+          'login', 'logout', 'password_change', 'role_change',
+          'batch_operation', 'system_backup', 'system_restore'
+        ]
+      },
+      { name: 'resource', type: 'text', required: true },
+      { name: 'resource_id', type: 'text' },
+      { name: 'user_id', type: 'relation', collectionId: '_pb_users_auth_', maxSelect: 1 },
+      { name: 'user_role', type: 'text' },
+      { name: 'details', type: 'json' },
+      { name: 'old_values', type: 'json' },
+      { name: 'new_values', type: 'json' },
+      { name: 'ip_address', type: 'text' },
+      { name: 'user_agent', type: 'text' },
+      { name: 'session_id', type: 'text' },
+      { name: 'compliance_flags', type: 'json' },
+      {
+        name: 'severity',
+        type: 'select',
+        required: true,
+        values: ['low', 'medium', 'high', 'critical']
+      },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        values: ['success', 'failure', 'warning']
+      },
+      { name: 'error_message', type: 'text' },
+      { name: 'processing_time_ms', type: 'number' },
+      { name: 'location', type: 'relation', collectionId: 'locations', maxSelect: 1 },
+      { name: 'device_info', type: 'json' },
+      {
+        name: 'business_impact',
+        type: 'select',
+        values: ['none', 'low', 'medium', 'high', 'critical']
+      },
+    ],
+    indexes: [
+      'CREATE INDEX idx_audit_logs_action ON audit_logs (action);',
+      'CREATE INDEX idx_audit_logs_resource ON audit_logs (resource);',
+      'CREATE INDEX idx_audit_logs_user_id ON audit_logs (user_id);',
+      'CREATE INDEX idx_audit_logs_timestamp ON audit_logs (created);',
+      'CREATE INDEX idx_audit_logs_severity ON audit_logs (severity);',
+      'CREATE INDEX idx_audit_logs_status ON audit_logs (status);',
+      'CREATE INDEX idx_audit_logs_session_id ON audit_logs (session_id);',
+    ],
+  });
+  app.save(auditLogsCollection);
+
+  // Create audit retention policies collection
+  const auditRetentionPoliciesCollection = new Collection({
+    name: 'audit_retention_policies',
+    type: 'base',
+    listRule: '@request.auth.role = "admin"',
+    viewRule: '@request.auth.role = "admin"',
+    createRule: '@request.auth.role = "admin"',
+    updateRule: '@request.auth.role = "admin"',
+    deleteRule: '@request.auth.role = "admin"',
+    fields: [
+      { name: 'name', type: 'text', required: true },
+      { name: 'description', type: 'text' },
+      { name: 'retention_days', type: 'number', required: true },
+      { name: 'severity_levels', type: 'json' },
+      { name: 'compliance_requirements', type: 'json' },
+      { name: 'auto_archive', type: 'bool' },
+      { name: 'archive_location', type: 'text' },
+      { name: 'is_active', type: 'bool' },
+    ],
+  });
+  app.save(auditRetentionPoliciesCollection);
+
+  // Create audit alerts collection for compliance monitoring
+  const auditAlertsCollection = new Collection({
+    name: 'audit_alerts',
+    type: 'base',
+    listRule: '@request.auth.role != "cashier"',
+    viewRule: '@request.auth.role != "cashier"',
+    createRule: '@request.auth.id != ""',
+    updateRule: '@request.auth.role != "cashier"',
+    deleteRule: '@request.auth.role = "admin"',
+    fields: [
+      {
+        name: 'alert_type',
+        type: 'select',
+        required: true,
+        values: [
+          'unauthorized_access', 'data_breach_attempt', 'unusual_activity',
+          'policy_violation', 'system_anomaly', 'compliance_breach'
+        ]
+      },
+      {
+        name: 'severity',
+        type: 'select',
+        required: true,
+        values: ['low', 'medium', 'high', 'critical']
+      },
+      { name: 'title', type: 'text', required: true },
+      { name: 'description', type: 'text' },
+      { name: 'related_audit_log', type: 'relation', collectionId: auditLogsCollection.id, maxSelect: 1 },
+      { name: 'affected_resources', type: 'json' },
+      { name: 'recommended_actions', type: 'json' },
+      { name: 'assigned_to', type: 'relation', collectionId: '_pb_users_auth_', maxSelect: 1 },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        values: ['open', 'investigating', 'resolved', 'dismissed']
+      },
+      { name: 'resolution_notes', type: 'text' },
+      { name: 'escalation_level', type: 'number' },
+    ],
+    indexes: [
+      'CREATE INDEX idx_audit_alerts_type ON audit_alerts (alert_type);',
+      'CREATE INDEX idx_audit_alerts_severity ON audit_alerts (severity);',
+      'CREATE INDEX idx_audit_alerts_status ON audit_alerts (status);',
+      'CREATE INDEX idx_audit_alerts_assigned_to ON audit_alerts (assigned_to);',
+    ],
+  });
+  app.save(auditAlertsCollection);
+
+  // Create default retention policies
+  const defaultPolicies = [
+    {
+      name: 'GDPR_Compliance',
+      description: 'GDPR required retention for personal data operations',
+      retention_days: 2555, // 7 years
+      severity_levels: ['high', 'critical'],
+      compliance_requirements: ['GDPR'],
+      auto_archive: true,
+      is_active: true,
+    },
+    {
+      name: 'SOX_Compliance',
+      description: 'SOX required retention for financial operations',
+      retention_days: 2555, // 7 years
+      severity_levels: ['medium', 'high', 'critical'],
+      compliance_requirements: ['SOX'],
+      auto_archive: true,
+      is_active: true,
+    },
+    {
+      name: 'HIPAA_Compliance',
+      description: 'HIPAA required retention for health data',
+      retention_days: 2555, // 7 years
+      severity_levels: ['high', 'critical'],
+      compliance_requirements: ['HIPAA'],
+      auto_archive: true,
+      is_active: true,
+    },
+    {
+      name: 'Standard_Retention',
+      description: 'Standard retention for general operations',
+      retention_days: 365, // 1 year
+      severity_levels: ['low', 'medium'],
+      auto_archive: false,
+      is_active: true,
+    },
+  ];
+
+  // Create default policies
+  defaultPolicies.forEach(policy => {
+    const record = new Record(auditRetentionPoliciesCollection);
+    record.set('name', policy.name);
+    record.set('description', policy.description);
+    record.set('retention_days', policy.retention_days);
+    record.set('severity_levels', policy.severity_levels);
+    record.set('compliance_requirements', policy.compliance_requirements);
+    record.set('auto_archive', policy.auto_archive);
+    record.set('is_active', policy.is_active);
+    app.save(record);
+  });
+
+}, (app) => {
+  // Rollback migration
+  const collectionsToDrop = ['audit_logs', 'audit_retention_policies', 'audit_alerts'];
+
+  collectionsToDrop.forEach(collectionName => {
+    try {
+      const collection = db.findCollectionByNameOrId(collectionName);
+      if (collection) {
+        db.dropCollection(collection);
+      }
+    } catch (error) {
+      console.warn(`Could not drop collection ${collectionName}:`, error);
+    }
+  });
+
+  // Remove audit fields from collections
+  const sensitiveCollections = ['users', 'sales', 'products', 'settings'];
+
+  sensitiveCollections.forEach(collectionName => {
+    try {
+      const collection = db.findCollectionByNameOrId(collectionName);
+      if (collection) {
+        collection.schema = collection.schema.filter(field =>
+          field.name !== 'audit_trail' &&
+          field.name !== 'last_modified_by' &&
+          field.name !== 'modification_reason'
+        );
+        db.saveCollection(collection);
+      }
+    } catch (error) {
+      console.warn(`Could not rollback audit fields from ${collectionName}:`, error);
+    }
+  });
+});

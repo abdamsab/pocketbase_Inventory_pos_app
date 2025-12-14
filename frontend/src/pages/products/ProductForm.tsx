@@ -1,21 +1,27 @@
 import { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCategories } from '../../hooks/useCategories';
+import { useProducts, useAddToInventory } from '../../hooks/useProducts';
 import { X, Upload, Loader2 } from 'lucide-react';
 import { pb } from '../../lib/pocketbase';
 import type { Product } from '../../types';
 
 interface ProductFormProps {
     product?: Product;
+    mode?: 'create' | 'add-stock' | 'edit-pricing'; // NEW: explicit mode control
     onClose: () => void;
     onSuccess: () => void;
 }
 
-export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
+export function ProductForm({ product, mode = 'create', onClose, onSuccess }: ProductFormProps) {
     const queryClient = useQueryClient();
     const { data: categories, isLoading: categoriesLoading } = useCategories();
+    const { data: existingProducts } = useProducts();
+    const addToInventory = useAddToInventory();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [creating, setCreating] = useState(false);
+    const [selectedProductId, setSelectedProductId] = useState<string>('');
 
     const [formData, setFormData] = useState({
         name: '',
@@ -29,22 +35,39 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
     const [image, setImage] = useState<File | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
 
+    // Handle product selection for add-stock mode
     useEffect(() => {
-        if (product) {
+        if (mode === 'add-stock' && selectedProductId && existingProducts) {
+            const selectedProduct = existingProducts.find(p => p.id === selectedProductId);
+            if (selectedProduct) {
+                setFormData({
+                    name: selectedProduct.name,
+                    sku: selectedProduct.sku,
+                    category: selectedProduct.category || '',
+                    cost_price: selectedProduct.cost_price.toString(),
+                    sale_price: selectedProduct.sale_price.toString(),
+                    stock: '0', // Reset stock for additional quantity input
+                    reorder_point: selectedProduct.reorder_point?.toString() || '5',
+                });
+                if (selectedProduct.image) {
+                    setPreview(pb.files.getUrl(selectedProduct, selectedProduct.image));
+                }
+            }
+        } else if (product && mode === 'edit-pricing') {
             setFormData({
                 name: product.name,
                 sku: product.sku,
-                category: product.category,
+                category: product.category || '',
                 cost_price: product.cost_price.toString(),
                 sale_price: product.sale_price.toString(),
                 stock: product.stock.toString(),
-                reorder_point: product.reorder_point.toString(),
+                reorder_point: product.reorder_point?.toString() || '5',
             });
             if (product.image) {
                 setPreview(pb.files.getUrl(product, product.image));
             }
         }
-    }, [product]);
+    }, [product, mode, selectedProductId, existingProducts]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -60,18 +83,27 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                 data.append('image', image);
             }
 
-            if (product) {
-                await pb.collection('products').update(product.id, data);
-            } else {
-                await pb.collection('products').create(data);
+            if (mode === 'create') {
+                // Create new product with initial stock
+                await addToInventory.mutateAsync(data);
+            } else if (mode === 'add-stock') {
+                // Add stock to existing product (or create if SKU doesn't exist)
+                await addToInventory.mutateAsync(data);
+            } else if (mode === 'edit-pricing' && product) {
+                // Edit pricing and image only
+                await pb.collection('products').update(product.id, {
+                    cost_price: parseFloat(formData.cost_price),
+                    sale_price: parseFloat(formData.sale_price),
+                    image: image,
+                });
             }
 
             queryClient.invalidateQueries({ queryKey: ['products'] });
             onSuccess();
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Product save error:', err);
-            setError(err.message || 'Failed to save product. Please check all fields.');
+            setError(err instanceof Error ? err.message : 'Failed to save product. Please check all fields.');
         } finally {
             setLoading(false);
         }
@@ -99,7 +131,6 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
     }
 
     if (!categories || categories.length === 0) {
-        const [creating, setCreating] = useState(false);
 
         return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -153,7 +184,9 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
             <div className="bg-surface border border-border rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center p-6 border-b border-border">
                     <h2 className="text-xl font-bold text-text-main">
-                        {product ? 'Edit Product' : 'Add New Product'}
+                        {mode === 'create' && 'Add New Product'}
+                        {mode === 'add-stock' && 'Add Product Stock'}
+                        {mode === 'edit-pricing' && 'Edit Product Pricing'}
                     </h2>
                     <button onClick={onClose} className="text-text-muted hover:text-text-main transition-colors">
                         <X size={24} />
@@ -167,8 +200,46 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                         </div>
                     )}
 
+                    {/* Conditional notification */}
+                    {mode === 'add-stock' && selectedProductId && (
+                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                            <p className="text-sm text-blue-800">
+                                Adding stock to: <strong>{formData.name}</strong> (SKU: {formData.sku})
+                            </p>
+                        </div>
+                    )}
+
+                    {mode === 'edit-pricing' && product && (
+                        <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
+                            <p className="text-sm text-amber-800">
+                                Editing pricing for: <strong>{product.name}</strong> (SKU: {product.sku})
+                            </p>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
+                            {/* Product selector for add-stock mode */}
+                            {mode === 'add-stock' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-text-main mb-2">Select Product *</label>
+                                    <select
+                                        required
+                                        value={selectedProductId}
+                                        onChange={(e) => setSelectedProductId(e.target.value)}
+                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                    >
+                                        <option value="">Choose product to add stock...</option>
+                                        {existingProducts?.map((prod) => (
+                                            <option key={prod.id} value={prod.id}>
+                                                {prod.name} (SKU: {prod.sku})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Basic product fields - shown for all modes but readonly for edit-pricing */}
                             <div>
                                 <label className="block text-sm font-medium text-text-main mb-2">Product Name *</label>
                                 <input
@@ -176,8 +247,9 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                     type="text"
                                     value={formData.name}
                                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                    className={`w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none ${mode === 'edit-pricing' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                     placeholder="Enter product name"
+                                    readOnly={mode === 'edit-pricing'}
                                 />
                             </div>
 
@@ -188,8 +260,9 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                     type="text"
                                     value={formData.sku}
                                     onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                                    className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                    className={`w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none ${mode === 'edit-pricing' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                     placeholder="Enter SKU"
+                                    readOnly={mode === 'edit-pricing'}
                                 />
                             </div>
 
@@ -199,7 +272,8 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                     required
                                     value={formData.category}
                                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                    className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                    className={`w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none ${mode === 'edit-pricing' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                    disabled={mode === 'edit-pricing'}
                                 >
                                     <option value="">Select Category</option>
                                     {categories.map((cat) => (
@@ -210,47 +284,57 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                 </select>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-text-main mb-2">Cost Price *</label>
-                                    <input
-                                        required
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={formData.cost_price}
-                                        onChange={(e) => setFormData({ ...formData, cost_price: e.target.value })}
-                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-text-main mb-2">Sale Price *</label>
-                                    <input
-                                        required
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={formData.sale_price}
-                                        onChange={(e) => setFormData({ ...formData, sale_price: e.target.value })}
-                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
-                                        placeholder="0.00"
-                                    />
-                                </div>
+                            {/* Stock field - readonly for edit-pricing mode */}
+                            <div>
+                                <label className="block text-sm font-medium text-text-main mb-2">
+                                    {mode === 'add-stock' ? 'Additional Stock *' : mode === 'edit-pricing' ? 'Current Stock' : 'Initial Stock'}
+                                </label>
+                                <input
+                                    required={mode !== 'edit-pricing'}
+                                    type="number"
+                                    min="0"
+                                    value={formData.stock}
+                                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                                    className={`w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none ${mode === 'edit-pricing' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                    placeholder={mode === 'add-stock' ? "Additional stock to add" : mode === 'edit-pricing' ? "Current stock (readonly)" : "Initial stock"}
+                                    readOnly={mode === 'edit-pricing'}
+                                />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-text-main mb-2">Stock</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={formData.stock}
-                                        onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
-                                        placeholder="0"
-                                    />
-                                </div>
+                            {/* Pricing fields - always shown for create/add-stock, editable for edit-pricing */}
+                            {(mode === 'create' || mode === 'add-stock' || mode === 'edit-pricing') && (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium text-text-main mb-2">Cost Price *</label>
+                                        <input
+                                            required
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={formData.cost_price}
+                                            onChange={(e) => setFormData({ ...formData, cost_price: e.target.value })}
+                                            className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-text-main mb-2">Sale Price *</label>
+                                        <input
+                                            required
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={formData.sale_price}
+                                            onChange={(e) => setFormData({ ...formData, sale_price: e.target.value })}
+                                            className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                </>
+                            )}
+
+                            {/* Reorder point - readonly for edit-pricing mode */}
+                            {(mode === 'create' || mode === 'edit-pricing') && (
                                 <div>
                                     <label className="block text-sm font-medium text-text-main mb-2">Reorder Point</label>
                                     <input
@@ -258,13 +342,13 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                         min="0"
                                         value={formData.reorder_point}
                                         onChange={(e) => setFormData({ ...formData, reorder_point: e.target.value })}
-                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                        className={`w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none ${mode === 'edit-pricing' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                         placeholder="5"
+                                        readOnly={mode === 'edit-pricing'}
                                     />
                                 </div>
-                            </div>
+                            )}
                         </div>
-
                         <div>
                             <label className="block text-sm font-medium text-text-main mb-2">Product Image</label>
                             <div className="border-2 border-dashed border-border rounded-lg p-4 text-center">
@@ -325,7 +409,10 @@ export function ProductForm({ product, onClose, onSuccess }: ProductFormProps) {
                                     Saving...
                                 </>
                             ) : (
-                                product ? 'Update Product' : 'Create Product'
+                                mode === 'create' ? 'Create Product' :
+                                mode === 'add-stock' ? 'Add Product' :
+                                mode === 'edit-pricing' ? 'Update Product' :
+                                'Save Product'
                             )}
                         </button>
                     </div>
