@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { pb } from '../../lib/pocketbase';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { useRef } from 'react';
-import { useReactToPrint } from 'react-to-print';
 import type { RecordModel } from 'pocketbase';
 
 interface Sale extends RecordModel {
@@ -15,21 +14,22 @@ interface Sale extends RecordModel {
     items?: any[];
     expand?: {
         user?: { name: string };
-        'sales_items(sale)'?: any[];
+        sales_items_via_sale?: any[];
     };
 }
 
 export function ReceiptView() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const componentRef = useRef(null);
+    const componentRef = useRef<HTMLDivElement>(null);
 
     const { data: sale, isLoading } = useQuery({
         queryKey: ['sale', id],
         queryFn: async () => {
             // Fetch sale with expanded items and user
             const record = await pb.collection('sales').getOne<Sale>(id!, {
-                expand: 'user,sales_items(sale).product',
+                expand: 'user,sales_items_via_sale.product',
+                fields: '*', // Include all fields including timestamps
             });
 
             // Manually fetch items if expand doesn't work as expected (PocketBase limitation on deep expand sometimes)
@@ -44,9 +44,122 @@ export function ReceiptView() {
         },
     });
 
-    const handlePrint = useReactToPrint({
-        contentRef: componentRef,
-    });
+    const handlePrint = () => {
+
+        // Create a print-optimized version in a new window
+        const printContent = componentRef.current?.innerHTML;
+
+        if (printContent) {
+            console.log('Opening print window...');
+            const printWindow = window.open('', '_blank', 'width=400,height=600');
+            console.log('Print window:', printWindow);
+
+            if (printWindow) {
+                printWindow.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                        <head>
+                            <title>Receipt - ${sale?.sale_number || 'N/A'}</title>
+                            <style>
+                                @page {
+                                    size: 80mm auto;
+                                    margin: 0;
+                                }
+                                body {
+                                    font-family: 'Courier New', monospace;
+                                    margin: 0;
+                                    padding: 5mm;
+                                    background: white;
+                                    color: black;
+                                    width: 80mm;
+                                    box-sizing: border-box;
+                                }
+                                .receipt {
+                                    width: 70mm; /* Content width to fit within 80mm page */
+                                    font-size: 10px;
+                                    line-height: 1.2;
+                                    margin: 0;
+                                }
+                                .receipt * {
+                                    box-sizing: border-box;
+                                }
+                                table {
+                                    width: 100%;
+                                    border-collapse: collapse;
+                                    margin: 3mm 0;
+                                    font-size: 9px;
+                                }
+                                th, td {
+                                    padding: 2mm;
+                                    text-align: left;
+                                }
+                                th {
+                                    border-bottom: 1px solid #000;
+                                    font-weight: bold;
+                                    font-size: 9px;
+                                }
+                                .text-center {
+                                    text-align: center;
+                                }
+                                .text-right {
+                                    text-align: right;
+                                }
+                                .font-bold {
+                                    font-weight: bold;
+                                }
+                                .border-t {
+                                    border-top: 1px solid #000;
+                                }
+                                .mt-4 {
+                                    margin-top: 4mm;
+                                }
+                                .mb-6 {
+                                    margin-bottom: 6mm;
+                                }
+                                .pb-6 {
+                                    padding-bottom: 6mm;
+                                }
+                                .pt-6 {
+                                    padding-top: 6mm;
+                                }
+                                h1 {
+                                    font-size: 14px;
+                                    margin: 3mm 0;
+                                }
+                                p {
+                                    margin: 2mm 0;
+                                }
+                                @media print {
+                                    body {
+                                        margin: 0;
+                                        -webkit-print-color-adjust: exact;
+                                        color-adjust: exact;
+                                    }
+                                    .receipt {
+                                        width: 70mm;
+                                    }
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="receipt">
+                                ${printContent}
+                            </div>
+                            <script>
+                                window.onload = function() {
+                                    window.print();
+                                    setTimeout(function() {
+                                        window.close();
+                                    }, 100);
+                                };
+                            </script>
+                        </body>
+                    </html>
+                `);
+                printWindow.document.close();
+            }
+        }
+    };
 
     if (isLoading) return (
         <div className="flex items-center justify-center h-64 text-primary">
@@ -113,7 +226,7 @@ export function ReceiptView() {
                                     <td className="py-3 text-slate-900">{item.expand?.product?.name || 'Unknown Product'}</td>
                                     <td className="py-3 text-center text-slate-600">{item.quantity}</td>
                                     <td className="py-3 text-right text-slate-600">${item.unit_price.toFixed(2)}</td>
-                                    <td className="py-3 text-right font-medium text-slate-900">${item.line_total.toFixed(2)}</td>
+                                    <td className="py-3 text-right font-medium text-slate-900">${item.total.toFixed(2)}</td>
                                 </tr>
                             ))}
                         </tbody>

@@ -34,7 +34,7 @@ export function PurchaseOrderForm() {
         setItems(items.filter((_, i) => i !== index));
     };
 
-    const updateItem = (index: number, field: string, value: any) => {
+    const updateItem = (index: number, field: string, value: string | number) => {
         const newItems = [...items];
         newItems[index] = { ...newItems[index], [field]: value };
         setItems(newItems);
@@ -67,9 +67,9 @@ export function PurchaseOrderForm() {
                 po_number: generatePONumber(),
                 supplier: formData.supplier,
                 order_date: formData.order_date,
-                expected_date: formData.expected_date || null,
-                received_date: null,
-                status: 'draft',
+                expected_date: formData.expected_date || undefined,
+                received_date: undefined,
+                status: 'draft' as const,
                 total: calculateTotal(),
                 notes: formData.notes,
                 created_by: user?.id || '',

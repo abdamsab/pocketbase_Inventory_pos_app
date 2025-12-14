@@ -1,14 +1,54 @@
 import { useState } from 'react';
-import { FileSpreadsheet, FileText, Download, Calendar, TrendingUp, Package, ShoppingCart } from 'lucide-react';
+import { FileSpreadsheet, FileText, Download, Calendar, TrendingUp, Package, ShoppingCart, BarChart3, Search, ChevronRight, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { pb } from '../../lib/pocketbase';
 import { exportData } from '../../utils/export';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 
+type ReportType = 'sales' | 'inventory' | 'purchase';
+
+interface SummaryCardProps {
+    title: string;
+    value: string;
+    description: string;
+    icon: any;
+    color: 'primary' | 'green' | 'red' | 'orange';
+}
+
+function SummaryCard({ title, value, description, icon: Icon, color }: SummaryCardProps) {
+    const colorClasses = {
+        primary: 'bg-primary/10 text-primary',
+        green: 'bg-green-100 text-green-600',
+        red: 'bg-red-100 text-red-600',
+        orange: 'bg-orange-100 text-orange-600',
+    };
+
+    return (
+        <div className="bg-surface border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex items-center gap-4">
+                <div className={`p-3 rounded-lg ${colorClasses[color]}`}>
+                    <Icon size={24} />
+                </div>
+                <div>
+                    <h3 className="text-sm font-medium text-text-muted">{title}</h3>
+                    <p className="text-2xl font-bold text-text-main mt-1">{value}</p>
+                    <p className="text-xs text-text-muted mt-1">{description}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export function Reports() {
-    const [reportType, setReportType] = useState<'sales' | 'inventory' | 'purchase'>('sales');
+    const [reportType, setReportType] = useState<ReportType>('sales');
     const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
     const [isGenerating, setIsGenerating] = useState(false);
+
+    // Report Data State
+    const [reportData, setReportData] = useState<any[]>([]);
+    const [summaryData, setSummaryData] = useState<any>(null);
+    const [generatedType, setGeneratedType] = useState<ReportType | null>(null);
 
     const setDateRange = (range: 'today' | 'week' | 'month' | 'quarter') => {
         const today = new Date();
@@ -35,13 +75,14 @@ export function Reports() {
         }
     };
 
-    const generateSalesReport = async (exportFormat: 'excel' | 'csv' | 'pdf') => {
+    const fetchSalesReport = async () => {
         setIsGenerating(true);
         try {
             const sales = await pb.collection('sales').getFullList({
                 filter: `created >= "${startDate}" && created <= "${endDate} 23:59:59"`,
                 expand: 'user,location',
                 sort: '-created',
+                requestKey: null
             });
 
             const salesItems = await Promise.all(
@@ -49,310 +90,515 @@ export function Reports() {
                     pb.collection('sales_items').getFullList({
                         filter: `sale="${sale.id}"`,
                         expand: 'product',
+                        requestKey: null
                     })
                 )
             );
 
-            const headers = ['Date', 'Sale #', 'User', 'Location', 'Items', 'Payment', 'Total', 'Status'];
-            const rows = sales.map((sale, index) => [
-                format(new Date(sale.created), 'MMM dd, yyyy HH:mm'),
-                sale.sale_number,
-                (sale as any).expand?.user?.name || 'N/A',
-                (sale as any).expand?.location?.name || 'N/A',
-                salesItems[index]?.length || 0,
-                sale.payment_method.toUpperCase(),
-                `$${sale.total.toFixed(2)}`,
-                sale.status,
-            ]);
+            const rows = sales.map((sale, index) => ({
+                id: sale.id,
+                date: sale.created,
+                sale_number: sale.sale_number,
+                user: sale.expand?.user?.name || 'N/A',
+                location: sale.expand?.location?.name || 'N/A',
+                items_count: salesItems[index]?.length || 0,
+                payment_method: sale.payment_method,
+                total: sale.total,
+                status: sale.status,
+            }));
 
-            // Add summary row
-            const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
-            rows.push(['', '', '', '', '', '', `Total: $${totalSales.toFixed(2)}`, '']);
+            // Calculate Summary
+            const totalSales = rows.reduce((sum, r) => sum + r.total, 0);
+            const totalTransactions = rows.length;
+            const avgTransaction = totalTransactions > 0 ? totalSales / totalTransactions : 0;
 
-            exportData({
-                headers,
-                rows,
-                filename: `sales-report-${startDate}-to-${endDate}`,
-                title: `Sales Report (${startDate} to ${endDate})`,
-            }, exportFormat);
+            setReportData(rows);
+            setSummaryData({
+                totalSales,
+                totalTransactions,
+                avgTransaction
+            });
+            setGeneratedType('sales');
         } catch (error) {
-            console.error('Failed to generate sales report:', error);
-            alert('Failed to generate report. Please try again.');
+            console.error('Failed to fetch sales report:', error);
+            alert('Failed to fetch report.');
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const generateInventoryReport = async (exportFormat: 'excel' | 'csv' | 'pdf') => {
+    const fetchInventoryReport = async () => {
         setIsGenerating(true);
         try {
             const products = await pb.collection('products').getFullList({
                 expand: 'category',
                 sort: 'name',
+                requestKey: null
             });
 
-            const headers = ['SKU', 'Product Name', 'Category', 'Stock', 'Reorder Point', 'Cost Price', 'Sale Price', 'Value', 'Status'];
-            const rows = products.map(product => {
-                const stockValue = product.stock * product.cost_price;
-                const status = product.stock <= product.reorder_point ? 'LOW STOCK' : 'OK';
+            const rows = products.map(product => ({
+                id: product.id,
+                sku: product.sku,
+                name: product.name,
+                category: product.expand?.category?.name || 'N/A',
+                stock: product.stock,
+                reorder_point: product.reorder_point || 0,
+                cost_price: product.cost_price,
+                sale_price: product.sale_price,
+                value: product.stock * product.cost_price,
+                status: product.stock <= (product.reorder_point || 0) ? 'LOW STOCK' : 'OK',
+            }));
 
-                return [
-                    product.sku,
-                    product.name,
-                    (product as any).expand?.category?.name || 'N/A',
-                    product.stock,
-                    product.reorder_point || 0,
-                    `$${product.cost_price.toFixed(2)}`,
-                    `$${product.sale_price.toFixed(2)}`,
-                    `$${stockValue.toFixed(2)}`,
-                    status,
-                ];
+            // Summary
+            const totalValue = rows.reduce((sum, r) => sum + r.value, 0);
+            const lowStockCount = rows.filter(r => r.status === 'LOW STOCK').length;
+            const totalItems = rows.reduce((sum, r) => sum + r.stock, 0);
+
+            setReportData(rows);
+            setSummaryData({
+                totalValue,
+                lowStockCount,
+                totalItems
             });
-
-            // Add summary
-            const totalValue = products.reduce((sum, p) => sum + (p.stock * p.cost_price), 0);
-            const lowStockCount = products.filter(p => p.stock <= p.reorder_point).length;
-            rows.push(['', '', '', '', '', '', `Total Value: $${totalValue.toFixed(2)}`, '', `Low Stock Items: ${lowStockCount}`]);
-
-            exportData({
-                headers,
-                rows,
-                filename: `inventory-report-${format(new Date(), 'yyyy-MM-dd')}`,
-                title: `Inventory Report (${format(new Date(), 'MMM dd, yyyy')})`,
-            }, exportFormat);
+            setGeneratedType('inventory');
         } catch (error) {
-            console.error('Failed to generate inventory report:', error);
-            alert('Failed to generate report. Please try again.');
+            console.error('Failed to fetch inventory report:', error);
+            alert('Failed to fetch report.');
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const generatePurchaseReport = async (exportFormat: 'excel' | 'csv' | 'pdf') => {
+    const fetchPurchaseReport = async () => {
         setIsGenerating(true);
         try {
             const purchaseOrders = await pb.collection('purchase_orders').getFullList({
-                filter: `created >= "${startDate}" && created <= "${endDate} 23:59:59"`,
+                filter: `order_date >= "${startDate}" && order_date <= "${endDate} 23:59:59"`,
                 expand: 'supplier,created_by',
-                sort: '-created',
+                sort: '-order_date',
+                requestKey: null
             });
 
-            const headers = ['Date', 'PO #', 'Supplier', 'Expected Date', 'Total', 'Status', 'Created By'];
-            const rows = purchaseOrders.map(po => [
-                format(new Date(po.order_date), 'MMM dd, yyyy'),
-                po.po_number,
-                (po as any).expand?.supplier?.name || 'N/A',
-                po.expected_date ? format(new Date(po.expected_date), 'MMM dd, yyyy') : 'Not set',
-                `$${po.total.toFixed(2)}`,
-                po.status.toUpperCase(),
-                (po as any).expand?.created_by?.name || 'N/A',
-            ]);
+            const rows = purchaseOrders.map(po => ({
+                id: po.id,
+                date: po.order_date,
+                po_number: po.po_number,
+                supplier: po.expand?.supplier?.name || 'N/A',
+                expected_date: po.expected_date || null,
+                total: po.total,
+                status: po.status,
+                created_by: po.expand?.created_by?.name || 'N/A',
+            }));
 
-            // Add summary
-            const totalPurchases = purchaseOrders.reduce((sum, po) => sum + po.total, 0);
-            const receivedCount = purchaseOrders.filter(po => po.status === 'received').length;
-            rows.push(['', '', '', '', `Total: $${totalPurchases.toFixed(2)}`, `Received: ${receivedCount}/${purchaseOrders.length}`, '']);
+            // Summary
+            const totalPurchases = rows.reduce((sum, r) => sum + r.total, 0);
+            const receivedCount = rows.filter(r => r.status === 'received').length;
+            const pendingCount = rows.filter(r => r.status === 'ordered' || r.status === 'pending').length;
 
-            exportData({
-                headers,
-                rows,
-                filename: `purchase-report-${startDate}-to-${endDate}`,
-                title: `Purchase Orders Report (${startDate} to ${endDate})`,
-            }, exportFormat);
+            setReportData(rows);
+            setSummaryData({
+                totalPurchases,
+                receivedCount,
+                pendingCount
+            });
+            setGeneratedType('purchase');
         } catch (error) {
-            console.error('Failed to generate purchase report:', error);
-            alert('Failed to generate report. Please try again.');
+            console.error('Failed to fetch purchase report:', error);
+            alert('Failed to fetch report.');
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const handleExport = (format: 'excel' | 'csv' | 'pdf') => {
-        switch (reportType) {
-            case 'sales':
-                generateSalesReport(format);
-                break;
-            case 'inventory':
-                generateInventoryReport(format);
-                break;
-            case 'purchase':
-                generatePurchaseReport(format);
-                break;
+    const handleGenerate = () => {
+        if (reportType === 'sales') fetchSalesReport();
+        if (reportType === 'inventory') fetchInventoryReport();
+        if (reportType === 'purchase') fetchPurchaseReport();
+    };
+
+    const handleExport = (formatType: 'excel' | 'csv' | 'pdf') => {
+        if (!reportData.length) return;
+
+        let headers: string[] = [];
+        let rows: any[][] = [];
+        let title = '';
+        let filename = '';
+
+        if (generatedType === 'sales') {
+            headers = ['Date', 'Sale #', 'User', 'Location', 'Items', 'Payment', 'Total', 'Status'];
+            rows = reportData.map(r => [
+                format(new Date(r.date), 'MMM dd, yyyy HH:mm'),
+                r.sale_number,
+                r.user,
+                r.location,
+                r.items_count,
+                r.payment_method.toUpperCase(),
+                `$${r.total.toFixed(2)}`,
+                r.status
+            ]);
+            // Summary row
+            rows.push(['', '', '', '', '', '', `Total: $${summaryData.totalSales.toFixed(2)}`, '']);
+            title = `Sales Report (${startDate} to ${endDate})`;
+            filename = `sales-report-${startDate}-${endDate}`;
+        } else if (generatedType === 'inventory') {
+            headers = ['SKU', 'Product Name', 'Category', 'Stock', 'Reorder', 'Cost', 'Price', 'Value', 'Status'];
+            rows = reportData.map(r => [
+                r.sku,
+                r.name,
+                r.category,
+                r.stock,
+                r.reorder_point,
+                `$${r.cost_price.toFixed(2)}`,
+                `$${r.sale_price.toFixed(2)}`,
+                `$${r.value.toFixed(2)}`,
+                r.status
+            ]);
+            rows.push(['', '', '', '', '', '', '', `Total: $${summaryData.totalValue.toFixed(2)}`, '']);
+            title = `Inventory Report (${format(new Date(), 'MMM dd, yyyy')})`;
+            filename = `inventory-report-${format(new Date(), 'yyyy-MM-dd')}`;
+        } else if (generatedType === 'purchase') {
+            headers = ['Date', 'PO #', 'Supplier', 'Expected', 'Total', 'Status', 'Created By'];
+            rows = reportData.map(r => [
+                format(new Date(r.date), 'MMM dd, yyyy'),
+                r.po_number,
+                r.supplier,
+                r.expected_date ? format(new Date(r.expected_date), 'MMM dd, yyyy') : '-',
+                `$${r.total.toFixed(2)}`,
+                r.status.toUpperCase(),
+                r.created_by
+            ]);
+            title = `Purchase Orders Report (${startDate} to ${endDate})`;
+            filename = `po-report-${startDate}-${endDate}`;
         }
+
+        exportData({
+            headers,
+            rows,
+            filename,
+            title
+        }, formatType);
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 max-w-[1600px] mx-auto pb-20">
             <div>
                 <h2 className="text-2xl font-heading font-bold text-text-main">Reports & Analytics</h2>
                 <p className="text-text-muted">Generate and export business reports</p>
             </div>
 
-            {/* Report Type Selection */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <button
-                    onClick={() => setReportType('sales')}
-                    className={`p-6 rounded-2xl border-2 transition-all ${reportType === 'sales'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border bg-surface hover:border-primary/50'
-                        }`}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-xl ${reportType === 'sales' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>
-                            <TrendingUp size={24} />
-                        </div>
-                        <div className="text-left">
-                            <h3 className="font-semibold text-text-main">Sales Report</h3>
-                            <p className="text-sm text-text-muted">Transaction history</p>
-                        </div>
-                    </div>
-                </button>
+            {/* Controls Section */}
+            <div className="bg-surface border border-border rounded-xl p-6 shadow-sm space-y-6">
 
-                <button
-                    onClick={() => setReportType('inventory')}
-                    className={`p-6 rounded-2xl border-2 transition-all ${reportType === 'inventory'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border bg-surface hover:border-primary/50'
-                        }`}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-xl ${reportType === 'inventory' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>
-                            <Package size={24} />
-                        </div>
-                        <div className="text-left">
-                            <h3 className="font-semibold text-text-main">Inventory Report</h3>
-                            <p className="text-sm text-text-muted">Stock levels & value</p>
-                        </div>
-                    </div>
-                </button>
+                {/* 1. Report Type Selection */}
+                <div className="flex flex-wrap gap-4">
+                    {(['sales', 'inventory', 'purchase'] as const).map((type) => (
+                        <button
+                            key={type}
+                            onClick={() => {
+                                setReportType(type);
+                                setReportData([]); // Clear old data on switch
+                                setGeneratedType(null);
+                            }}
+                            className={`flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all min-w-[140px] ${reportType === type
+                                ? 'border-primary bg-primary/5 text-primary'
+                                : 'border-border bg-background hover:bg-surfaceHighlight text-text-muted hover:text-text-main'
+                                }`}
+                        >
+                            {type === 'sales' && <TrendingUp size={24} />}
+                            {type === 'inventory' && <Package size={24} />}
+                            {type === 'purchase' && <ShoppingCart size={24} />}
+                            <span className="font-medium capitalize">{type} Report</span>
+                        </button>
+                    ))}
 
-                <button
-                    onClick={() => setReportType('purchase')}
-                    className={`p-6 rounded-2xl border-2 transition-all ${reportType === 'purchase'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border bg-surface hover:border-primary/50'
-                        }`}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-xl ${reportType === 'purchase' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>
-                            <ShoppingCart size={24} />
-                        </div>
-                        <div className="text-left">
-                            <h3 className="font-semibold text-text-main">Purchase Report</h3>
-                            <p className="text-sm text-text-muted">Purchase orders</p>
-                        </div>
-                    </div>
-                </button>
-            </div>
-
-            {/* Date Range Selection */}
-            <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg">
-                <h3 className="text-lg font-semibold text-text-main mb-4 flex items-center gap-2">
-                    <Calendar size={20} />
-                    Date Range
-                </h3>
-
-                <div className="flex flex-wrap gap-3 mb-4">
-                    <button
-                        onClick={() => setDateRange('today')}
-                        className="px-4 py-2 bg-surfaceHighlight hover:bg-primary/10 hover:text-primary rounded-lg transition-colors text-sm font-medium text-text-main"
+                    {/* Advanced Analytics Link */}
+                    <Link
+                        to="/reports/advanced-analytics"
+                        className="flex flex-col items-center gap-3 p-4 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-surfaceHighlight text-text-muted hover:text-text-main transition-all min-w-[140px]"
                     >
-                        Today
-                    </button>
-                    <button
-                        onClick={() => setDateRange('week')}
-                        className="px-4 py-2 bg-surfaceHighlight hover:bg-primary/10 hover:text-primary rounded-lg transition-colors text-sm font-medium text-text-main"
-                    >
-                        Last 7 Days
-                    </button>
-                    <button
-                        onClick={() => setDateRange('month')}
-                        className="px-4 py-2 bg-surfaceHighlight hover:bg-primary/10 hover:text-primary rounded-lg transition-colors text-sm font-medium text-text-main"
-                    >
-                        This Month
-                    </button>
-                    <button
-                        onClick={() => setDateRange('quarter')}
-                        className="px-4 py-2 bg-surfaceHighlight hover:bg-primary/10 hover:text-primary rounded-lg transition-colors text-sm font-medium text-text-main"
-                    >
-                        Last 3 Months
-                    </button>
+                        <BarChart3 size={24} />
+                        <span className="font-medium">Advanced</span>
+                    </Link>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-text-main mb-2">Start Date</label>
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="w-full bg-surface border border-border rounded-lg px-4 py-2.5 text-text-main focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-text-main mb-2">End Date</label>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="w-full bg-surface border border-border rounded-lg px-4 py-2.5 text-text-main focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                        />
+                {/* 2. Filters & Actions */}
+                <div className="flex flex-col lg:flex-row gap-6 items-end border-t border-border pt-6">
+                    {/* Date Range - Only for Sales and Purchase */}
+                    {reportType !== 'inventory' ? (
+                        <div className="space-y-3 flex-1">
+                            <label className="text-sm font-medium text-text-main flex items-center gap-2">
+                                <Calendar size={16} /> Date Range
+                            </label>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                                {(['today', 'week', 'month', 'quarter'] as const).map(range => (
+                                    <button
+                                        key={range}
+                                        onClick={() => setDateRange(range)}
+                                        className="px-3 py-1.5 text-xs bg-surfaceHighlight hover:bg-primary/10 hover:text-primary rounded-md transition-colors"
+                                    >
+                                        {range.charAt(0).toUpperCase() + range.slice(1)}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
+                                />
+                                <span className="text-text-muted">-</span>
+                                <input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
+                                />
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex items-center p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100">
+                            <Package size={20} className="mr-3" />
+                            <div>
+                                <p className="font-medium">Current Stock Snapshot</p>
+                                <p className="text-xs opacity-80">This report displays real-time inventory levels and values. Date filtering is not applicable.</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3">
+                        <button
+                            onClick={handleGenerate}
+                            disabled={isGenerating}
+                            className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/20"
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white"></div>
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <Search size={18} />
+                                    Generate Report
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             </div>
 
-            {/* Export Options */}
-            <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg">
-                <h3 className="text-lg font-semibold text-text-main mb-4 flex items-center gap-2">
-                    <Download size={20} />
-                    Export Report
-                </h3>
+            {/* Report Content */}
+            {generatedType && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <button
-                        onClick={() => handleExport('excel')}
-                        disabled={isGenerating}
-                        className="flex items-center justify-center gap-3 p-4 bg-green-50 hover:bg-green-100 border-2 border-green-200 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                        <FileSpreadsheet className="text-green-600" size={24} />
-                        <div className="text-left">
-                            <p className="font-semibold text-green-900">Excel</p>
-                            <p className="text-xs text-green-700">.xlsx format</p>
+                    {/* Summary Cards */}
+                    {generatedType === 'sales' && summaryData && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <SummaryCard
+                                title="Total Sales"
+                                value={`$${summaryData.totalSales.toFixed(2)}`}
+                                description={`${startDate} to ${endDate}`}
+                                icon={DollarSign}
+                                color="green"
+                            />
+                            <SummaryCard
+                                title="Transactions"
+                                value={summaryData.totalTransactions}
+                                description="Total orders processed"
+                                icon={FileText}
+                                color="primary"
+                            />
+                            <SummaryCard
+                                title="Avg. Transaction"
+                                value={`$${summaryData.avgTransaction.toFixed(2)}`}
+                                description="Average order value"
+                                icon={TrendingUp}
+                                color="orange"
+                            />
                         </div>
-                    </button>
+                    )}
 
-                    <button
-                        onClick={() => handleExport('csv')}
-                        disabled={isGenerating}
-                        className="flex items-center justify-center gap-3 p-4 bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                        <FileText className="text-blue-600" size={24} />
-                        <div className="text-left">
-                            <p className="font-semibold text-blue-900">CSV</p>
-                            <p className="text-xs text-blue-700">.csv format</p>
+                    {generatedType === 'inventory' && summaryData && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <SummaryCard
+                                title="Total Stock Value"
+                                value={`$${summaryData.totalValue.toFixed(2)}`}
+                                description="Cost price valuation"
+                                icon={DollarSign}
+                                color="green"
+                            />
+                            <SummaryCard
+                                title="Products"
+                                value={summaryData.totalItems}
+                                description="Total units in stock"
+                                icon={Package}
+                                color="primary"
+                            />
+                            <SummaryCard
+                                title="Low Stock Alerts"
+                                value={summaryData.lowStockCount}
+                                description="Items below reorder point"
+                                icon={AlertTriangle}
+                                color="red"
+                            />
                         </div>
-                    </button>
+                    )}
 
-                    <button
-                        onClick={() => handleExport('pdf')}
-                        disabled={isGenerating}
-                        className="flex items-center justify-center gap-3 p-4 bg-red-50 hover:bg-red-100 border-2 border-red-200 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                        <FileText className="text-red-600" size={24} />
-                        <div className="text-left">
-                            <p className="font-semibold text-red-900">PDF</p>
-                            <p className="text-xs text-red-700">.pdf format</p>
+                    {generatedType === 'purchase' && summaryData && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <SummaryCard
+                                title="Total Spend"
+                                value={`$${summaryData.totalPurchases.toFixed(2)}`}
+                                description="Total Purchase Orders"
+                                icon={DollarSign}
+                                color="red"
+                            />
+                            <SummaryCard
+                                title="Received POs"
+                                value={summaryData.receivedCount}
+                                description="Completed orders"
+                                icon={CheckCircle}
+                                color="green"
+                            />
+                            <SummaryCard
+                                title="Pending POs"
+                                value={summaryData.pendingCount}
+                                description="Awaiting delivery"
+                                icon={Calendar}
+                                color="orange"
+                            />
                         </div>
-                    </button>
-                </div>
+                    )}
 
-                {isGenerating && (
-                    <div className="mt-4 flex items-center justify-center gap-3 text-primary">
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
-                        <span className="text-sm font-medium">Generating report...</span>
+                    {/* Data Table */}
+                    <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+                        <div className="p-4 border-b border-border flex justify-between items-center bg-background/50">
+                            <h3 className="font-semibold text-text-main flex items-center gap-2">
+                                <FileText size={18} className="text-primary" />
+                                Report Data
+                                <span className="text-xs font-normal text-text-muted bg-surfaceHighlight px-2 py-0.5 rounded-full">
+                                    {reportData.length} rows
+                                </span>
+                            </h3>
+
+                            {/* Export Actions */}
+                            <div className="flex gap-2">
+                                <button onClick={() => handleExport('excel')} className="p-2 hover:bg-surfaceHighlight rounded-lg text-green-600 transition-colors" title="Export Excel">
+                                    <FileSpreadsheet size={20} />
+                                </button>
+                                <button onClick={() => handleExport('csv')} className="p-2 hover:bg-surfaceHighlight rounded-lg text-blue-600 transition-colors" title="Export CSV">
+                                    <FileText size={20} />
+                                </button>
+                                <button onClick={() => handleExport('pdf')} className="p-2 hover:bg-surfaceHighlight rounded-lg text-red-600 transition-colors" title="Export PDF">
+                                    <Download size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto max-h-[500px]">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-surfaceHighlight sticky top-0 z-10">
+                                    <tr>
+                                        {generatedType === 'sales' && (
+                                            <>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Date</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Sale #</th>
+                                                {/* <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">User</th> */}
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Items</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Method</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">Total</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Status</th>
+                                            </>
+                                        )}
+                                        {generatedType === 'inventory' && (
+                                            <>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">SKU</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Product</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Category</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">Stock</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">Value</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Status</th>
+                                            </>
+                                        )}
+                                        {generatedType === 'purchase' && (
+                                            <>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Date</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">PO #</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Supplier</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">Total</th>
+                                                <th className="p-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Status</th>
+                                            </>
+                                        )}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border">
+                                    {reportData.length > 0 ? (
+                                        reportData.map((row, i) => (
+                                            <tr key={row.id || i} className="hover:bg-surfaceHighlight/50 transition-colors">
+                                                {generatedType === 'sales' && (
+                                                    <>
+                                                        <td className="p-3 text-sm text-text-main">{format(new Date(row.date), 'MMM dd, HH:mm')}</td>
+                                                        <td className="p-3 text-sm text-text-main font-mono">{row.sale_number}</td>
+                                                        {/* <td className="p-3 text-sm text-text-muted">{row.user}</td> */}
+                                                        <td className="p-3 text-sm text-text-main">{row.items_count}</td>
+                                                        <td className="p-3 text-sm text-text-main capitalize">{row.payment_method?.replace('_', ' ')}</td>
+                                                        <td className="p-3 text-sm text-text-main font-semibold text-right">${row.total.toFixed(2)}</td>
+                                                        <td className="p-3">
+                                                            <span className={`px-2 py-0.5 text-xs rounded-full ${row.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                                                                }`}>
+                                                                {row.status}
+                                                            </span>
+                                                        </td>
+                                                    </>
+                                                )}
+                                                {generatedType === 'inventory' && (
+                                                    <>
+                                                        <td className="p-3 text-sm text-text-muted font-mono">{row.sku}</td>
+                                                        <td className="p-3 text-sm text-text-main font-medium">{row.name}</td>
+                                                        <td className="p-3 text-sm text-text-muted">{row.category}</td>
+                                                        <td className="p-3 text-sm text-text-main text-right">{row.stock}</td>
+                                                        <td className="p-3 text-sm text-text-main text-right">${row.value.toFixed(2)}</td>
+                                                        <td className="p-3">
+                                                            {row.status === 'LOW STOCK' ? (
+                                                                <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">Low Stock</span>
+                                                            ) : (
+                                                                <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">OK</span>
+                                                            )}
+                                                        </td>
+                                                    </>
+                                                )}
+                                                {generatedType === 'purchase' && (
+                                                    <>
+                                                        <td className="p-3 text-sm text-text-main">{format(new Date(row.date), 'MMM dd, yyyy')}</td>
+                                                        <td className="p-3 text-sm text-text-main font-mono">{row.po_number}</td>
+                                                        <td className="p-3 text-sm text-text-main">{row.supplier}</td>
+                                                        <td className="p-3 text-sm text-text-main text-right">${row.total.toFixed(2)}</td>
+                                                        <td className="p-3">
+                                                            <span className={`px-2 py-0.5 text-xs rounded-full ${row.status === 'received' ? 'bg-green-100 text-green-700' :
+                                                                row.status === 'pending' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'
+                                                                }`}>
+                                                                {row.status}
+                                                            </span>
+                                                        </td>
+                                                    </>
+                                                )}
+                                            </tr>
+                                        ))
+                                    ) : (
+                                        <tr>
+                                            <td colSpan={8} className="p-8 text-center text-text-muted">
+                                                No records found for the selected period.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
         </div>
     );
 }

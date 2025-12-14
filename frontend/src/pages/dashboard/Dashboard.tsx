@@ -1,9 +1,11 @@
-import { DollarSign, ShoppingBag, AlertTriangle, TrendingUp, Users, Clock, Calendar } from 'lucide-react';
+import { DollarSign, ShoppingBag, AlertTriangle, TrendingUp, Users, Clock, Calendar, Wifi, WifiOff } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { pb } from '../../lib/pocketbase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { useState, useEffect } from 'react';
+import { useRealtimeDashboard } from '../../hooks/useRealtimeSubscription';
+import { DashboardSkeleton, EmptySales } from '../../components/common/LoadingStates';
 
 const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
     <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 group relative overflow-hidden">
@@ -32,6 +34,12 @@ const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
 
 export function Dashboard() {
     const [currentTime, setCurrentTime] = useState(new Date());
+
+    // Real-time updates
+    const realtimeUpdates = useRealtimeDashboard((event) => {
+        console.log('Real-time dashboard update:', event);
+        // Trigger dashboard refresh when any data changes
+    });
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -112,11 +120,7 @@ export function Dashboard() {
         refetchInterval: 30000, // Refresh every 30 seconds
     });
 
-    if (isLoading) return (
-        <div className="flex items-center justify-center h-64 text-primary">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-current"></div>
-        </div>
-    );
+    if (isLoading) return <DashboardSkeleton />;
 
     if (error) return (
         <div className="text-center py-12 text-danger">
@@ -126,13 +130,32 @@ export function Dashboard() {
 
     return (
         <div className="space-y-6">
-            {/* Header with Date/Time */}
+            {/* Header with Date/Time and Connection Status */}
             <div className="flex justify-between items-start">
                 <div>
                     <h2 className="text-2xl font-heading font-bold text-text-main">Dashboard</h2>
                     <p className="text-text-muted">Welcome back! Here's what's happening today.</p>
                 </div>
-                <div className="text-right">
+                <div className="text-right space-y-2">
+                    {/* Connection Status */}
+                    <div className="flex items-center justify-end gap-2">
+                        {realtimeUpdates.isConnected ? (
+                            <Wifi className="w-4 h-4 text-green-500" />
+                        ) : (
+                            <WifiOff className="w-4 h-4 text-yellow-500" />
+                        )}
+                        <span className={`text-xs font-medium ${
+                            realtimeUpdates.isConnected
+                                ? 'text-green-600'
+                                : 'text-yellow-600'
+                        }`}>
+                            {realtimeUpdates.isConnected
+                                ? 'Real-time Active'
+                                : 'Real-time Offline'}
+                        </span>
+                    </div>
+
+                    {/* Date/Time */}
                     <div className="flex items-center gap-2 text-text-main font-semibold">
                         <Clock size={18} />
                         {format(currentTime, 'HH:mm:ss')}
@@ -215,10 +238,7 @@ export function Dashboard() {
                                 </div>
                             ))
                         ) : (
-                            <div className="text-center py-8 text-text-muted">
-                                <ShoppingBag size={32} className="mx-auto mb-2 opacity-50" />
-                                <p className="text-sm">No recent sales</p>
-                            </div>
+                            <EmptySales />
                         )}
                     </div>
                 </div>

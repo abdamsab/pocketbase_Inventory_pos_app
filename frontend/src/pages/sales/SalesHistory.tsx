@@ -7,12 +7,16 @@ export function SalesHistory() {
     const { data: sales, isLoading } = useQuery({
         queryKey: ['sales'],
         queryFn: async () => {
-            return await pb.collection('sales').getFullList({
-                sort: '-created',
+            const result = await pb.collection('sales').getList(1, 100, {
+                sort: '-created', // Sort by created date (most recent first)
                 expand: 'user',
+                fields: '*', // Request all fields including system fields
             });
+            return result.items;
         },
     });
+
+    // Sales history displays properly with created/updated fields added to schema
 
     if (isLoading) return (
         <div className="flex items-center justify-center h-64 text-primary">
@@ -51,13 +55,16 @@ export function SalesHistory() {
                                     <td className="px-6 py-4 text-text-muted">
                                         <div className="flex items-center gap-2">
                                             <Calendar size={14} />
-                                            {new Date(sale.created).toLocaleDateString()} {new Date(sale.created).toLocaleTimeString()}
+                                            {sale.created ?
+                                                `${new Date(sale.created).toLocaleDateString()} ${new Date(sale.created).toLocaleTimeString()}` :
+                                                'Date not available'
+                                            }
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-text-main">
                                         <div className="flex items-center gap-2">
                                             <User size={14} className="text-text-muted" />
-                                            {sale.expand?.user?.name || 'Unknown'}
+                                            {sale.expand?.user?.name || sale.expand?.user?.email || 'Unknown'}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">

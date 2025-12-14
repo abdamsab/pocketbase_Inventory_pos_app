@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Suppliers API</title>
+</head>
+<body>
+    <h1>Testing Suppliers API</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        const output = document.getElementById('output');
+
+        function log(message) {
+            output.innerHTML += '<p>' + message + '</p>';
+            console.log(message);
+        }
+
+        async function testSuppliers() {
+            try {
+                log('🔍 Testing suppliers API...');
+
+                // First, try to authenticate
+                const authResponse = await fetch('http://127.0.0.1:8090/api/collections/users/auth-with-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        identity: 'admin@pos.com',
+                        password: 'password123'
+                    })
+                });
+
+                if (!authResponse.ok) {
+                    throw new Error('Auth failed: ' + authResponse.status);
+                }
+
+                const authData = await authResponse.json();
+                log('✅ Authentication successful');
+                log('Token: ' + (authData.token ? 'present' : 'missing'));
+
+                // Now try to get suppliers
+                const suppliersResponse = await fetch('http://127.0.0.1:8090/api/collections/suppliers/records', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + authData.token,
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                log('Suppliers response status: ' + suppliersResponse.status);
+
+                if (suppliersResponse.ok) {
+                    const suppliersData = await suppliersResponse.json();
+                    log('✅ Suppliers access successful: ' + suppliersData.items.length + ' records');
+                } else {
+                    const errorText = await suppliersResponse.text();
+                    log('❌ Suppliers access failed: ' + errorText);
+                }
+
+            } catch (error) {
+                log('❌ Error: ' + error.message);
+            }
+        }
+
+        testSuppliers();
+    </script>
+</body>
+</html>

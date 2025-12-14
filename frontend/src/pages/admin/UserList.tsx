@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pb } from '../../lib/pocketbase';
-import { User as UserIcon, Mail, Shield, Trash2, Plus } from 'lucide-react';
+import { User as UserIcon, Mail, Shield, Trash2, Plus, Pencil } from 'lucide-react';
 import type { User } from '../../types';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -11,6 +11,7 @@ export function UserList() {
     const { user: currentUser } = useAuthStore();
     const queryClient = useQueryClient();
     const [isAddOpen, setIsAddOpen] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const { data: users, isLoading } = useQuery({
         queryKey: ['users'],
@@ -36,6 +37,11 @@ export function UserList() {
         }
     };
 
+    const handleClose = () => {
+        setIsAddOpen(false);
+        setSelectedUser(null);
+    };
+
     if (isLoading) return (
         <div className="flex items-center justify-center h-64 text-primary">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-current"></div>
@@ -50,7 +56,10 @@ export function UserList() {
                     <p className="text-text-muted">Manage system access and roles</p>
                 </div>
                 <button
-                    onClick={() => setIsAddOpen(true)}
+                    onClick={() => {
+                        setSelectedUser(null);
+                        setIsAddOpen(true);
+                    }}
                     className="btn-primary flex items-center gap-2"
                 >
                     <Plus size={20} />
@@ -58,7 +67,12 @@ export function UserList() {
                 </button>
             </div>
 
-            {isAddOpen && <UserForm onClose={() => setIsAddOpen(false)} />}
+            {isAddOpen && (
+                <UserForm
+                    onClose={handleClose}
+                    user={selectedUser}
+                />
+            )}
 
             <div className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
@@ -105,17 +119,30 @@ export function UserList() {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-sm text-text-muted">
-                                        {new Date(user.created).toLocaleDateString()}
+                                        {user.created ? new Date(user.created).toLocaleDateString() : 'N/A'}
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         {user.id !== currentUser?.id && (
-                                            <button
-                                                onClick={() => handleDelete(user.id)}
-                                                className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
-                                                title="Delete User"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
+                                            <>
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedUser(user);
+                                                        setIsAddOpen(true);
+                                                    }}
+                                                    className="p-2 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                                    title="Edit User"
+                                                >
+                                                    <Pencil size={18} />
+                                                </button>
+
+                                                <button
+                                                    onClick={() => handleDelete(user.id)}
+                                                    className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
+                                                    title="Delete User"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </>
                                         )}
                                     </td>
                                 </tr>

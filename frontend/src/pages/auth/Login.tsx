@@ -1,29 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { useNavigate } from 'react-router-dom';
-import { Store, Loader2, Lock, Mail } from 'lucide-react';
+import { Store, Loader2, Lock, Mail, AlertCircle } from 'lucide-react';
 
 export function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
 
-    const login = useAuthStore((state) => state.login);
+    const { login, isLoading, error, isValid, clearError } = useAuthStore();
     const navigate = useNavigate();
+
+    // Redirect if already authenticated
+    useEffect(() => {
+        if (isValid) {
+            navigate('/dashboard', { replace: true });
+        }
+    }, [isValid, navigate]);
+
+    // Clear errors when component unmounts or inputs change
+    useEffect(() => {
+        return () => clearError();
+    }, [clearError]);
+
+    useEffect(() => {
+        if (email || password) {
+            clearError();
+        }
+    }, [email, password, clearError]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
-        setError('');
 
         try {
             await login(email, password);
-            navigate('/');
+            // Navigation will happen via useEffect when isValid becomes true
         } catch (err) {
-            setError('Invalid email or password');
-        } finally {
-            setLoading(false);
+            // Error is handled by the auth store
+            console.error('Login failed:', err);
         }
     };
 
@@ -44,7 +57,8 @@ export function Login() {
                     </div>
 
                     {error && (
-                        <div className="bg-danger/10 border border-danger/20 text-danger px-4 py-3 rounded-xl mb-6 text-sm text-center font-medium">
+                        <div className="bg-danger/10 border border-danger/20 text-danger px-4 py-3 rounded-xl mb-6 text-sm text-center font-medium flex items-center justify-center gap-2">
+                            <AlertCircle size={16} />
                             {error}
                         </div>
                     )}
@@ -82,10 +96,10 @@ export function Login() {
 
                         <button
                             type="submit"
-                            disabled={loading}
+                            disabled={isLoading}
                             className="w-full bg-gradient-to-r from-primary to-primaryHover text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-70 mt-2"
                         >
-                            {loading ? <Loader2 className="animate-spin" /> : 'Sign In'}
+                            {isLoading ? <Loader2 className="animate-spin" /> : 'Sign In'}
                         </button>
                     </form>
 

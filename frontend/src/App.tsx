@@ -8,14 +8,23 @@ import { ProductList } from './pages/products/ProductList';
 import { SalesHistory } from './pages/sales/SalesHistory';
 import { ReceiptView } from './pages/sales/ReceiptView';
 import { UserList } from './pages/admin/UserList';
+import { CategoryList } from './pages/admin/CategoryList';
+import { LocationList } from './pages/admin/LocationList';
+// import { AuditLog } from './pages/admin/AuditLog';
 import { Settings } from './pages/settings/Settings';
 import { SupplierList } from './pages/suppliers/SupplierList';
 import { PurchaseOrderList } from './pages/purchase-orders/PurchaseOrderList';
 import { PurchaseOrderForm } from './pages/purchase-orders/PurchaseOrderForm';
 import { PurchaseOrderView } from './pages/purchase-orders/PurchaseOrderView';
 import { Reports } from './pages/reports/Reports';
+import { AdvancedAnalytics } from './pages/reports/AdvancedAnalytics';
+import { InventoryEntriesList } from './pages/inventory/InventoryEntriesList';
+import { SalesItemsList } from './pages/sales/SalesItemsList';
+
+console.log('🎯 App.tsx: App component rendering...');
 
 function App() {
+  console.log('🛣️ App.tsx: Setting up router...');
   return (
     <BrowserRouter>
       <Routes>
@@ -34,7 +43,13 @@ function App() {
             <Route path="/purchase-orders/new" element={<PurchaseOrderForm />} />
             <Route path="/purchase-orders/:id" element={<PurchaseOrderView />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/reports/advanced-analytics" element={<AdvancedAnalytics />} />
+            <Route path="/inventory-entries" element={<InventoryEntriesList />} />
+            <Route path="/sales-items" element={<SalesItemsList />} />
+            <Route path="/categories" element={<CategoryList />} />
+            <Route path="/locations" element={<LocationList />} />
             <Route path="/users" element={<UserList />} />
+            {/* <Route path="/audit-logs" element={<AuditLog />} /> */}
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Route>

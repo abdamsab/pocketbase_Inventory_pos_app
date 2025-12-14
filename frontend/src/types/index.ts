@@ -1,99 +1,50 @@
 import type { RecordModel } from 'pocketbase';
+import type { z } from 'zod';
+import { ValidationSchemas } from './validationSchemas';
 
-export interface User extends RecordModel {
-    name: string;
-    avatar: string;
-    role: 'admin' | 'manager' | 'cashier';
-    location: string; // Relation ID
-}
+// Derive TypeScript types from Zod validation schemas for type synchronization
+// This ensures frontend types stay in sync with validation schemas and backend structure
 
-export interface Location extends RecordModel {
-    name: string;
-    address: string;
-    code: string;
-    tax_rate: number;
-}
+export type User = z.infer<typeof ValidationSchemas.User> & RecordModel;
+export type AuthResponse = z.infer<typeof ValidationSchemas.AuthResponse>;
+export type Location = z.infer<typeof ValidationSchemas.Location> & RecordModel;
+export type Product = z.infer<typeof ValidationSchemas.Product> & RecordModel;
+export type Sale = z.infer<typeof ValidationSchemas.Sale> & RecordModel;
+export type SaleItem = z.infer<typeof ValidationSchemas.SaleItem> & RecordModel;
+export type InventoryEntry = z.infer<typeof ValidationSchemas.InventoryEntry> & RecordModel;
+export type Category = z.infer<typeof ValidationSchemas.Category> & RecordModel;
+export type Supplier = z.infer<typeof ValidationSchemas.Supplier> & RecordModel;
+export type PurchaseOrder = z.infer<typeof ValidationSchemas.PurchaseOrder> & RecordModel;
+export type PurchaseOrderItem = z.infer<typeof ValidationSchemas.PurchaseOrderItem> & RecordModel;
+export type StockAdjustment = z.infer<typeof ValidationSchemas.StockAdjustment> & RecordModel;
+export type Settings = z.infer<typeof ValidationSchemas.Settings> & RecordModel;
+export type Receipt = z.infer<typeof ValidationSchemas.Receipt> & RecordModel;
 
-export interface Product extends RecordModel {
-    name: string;
-    sku: string;
-    barcode: string;
-    category: string; // Relation ID
-    cost_price: number;
-    sale_price: number;
-    stock: number;
-    reorder_point: number;
-    image: string;
-}
+// List response types for pagination
+export type ListResponse<T> = {
+  page: number;
+  perPage: number;
+  totalItems: number;
+  totalPages: number;
+  items: T[];
+};
 
-export interface Sale extends RecordModel {
-    sale_number: string;
-    user: string; // Relation ID
-    location: string; // Relation ID
-    total: number;
-    payment_method: 'cash' | 'card';
-    status: 'completed' | 'voided';
-}
+// Error response types
+export type ErrorResponse = z.infer<typeof ValidationSchemas.ErrorResponse>;
 
-export interface SaleItem extends RecordModel {
-    sale: string; // Relation ID
-    product: string; // Relation ID
-    quantity: number;
-    unit_price: number;
-    line_total: number;
-}
+// Batch operation types
+export type BatchRequest = z.infer<typeof ValidationSchemas.BatchRequest>;
+export type BatchResponse = z.infer<typeof ValidationSchemas.BatchResponse>;
 
-export interface InventoryEntry extends RecordModel {
-    product: string; // Relation ID
-    location: string; // Relation ID
-    type: 'in' | 'out' | 'adjustment';
-    quantity: number;
-    reason: string;
-}
+// File upload types
+export type FileUploadResponse = z.infer<typeof ValidationSchemas.FileUploadResponse>;
 
-export interface Category extends RecordModel {
-    name: string;
-}
+// Re-export validation schemas for runtime validation
+export { ValidationSchemas };
 
-export interface Supplier extends RecordModel {
-    name: string;
-    email: string;
-    phone: string;
-    contact_person: string;
-    address: string;
-    payment_terms: string;
-    notes: string;
-    active: boolean;
-}
-
-export interface PurchaseOrder extends RecordModel {
-    po_number: string;
-    supplier: string; // Relation ID
-    order_date: string;
-    expected_date: string;
-    received_date: string;
-    status: 'draft' | 'sent' | 'partial' | 'received' | 'cancelled';
-    total: number;
-    notes: string;
-    created_by: string; // Relation ID
-}
-
-export interface PurchaseOrderItem extends RecordModel {
-    purchase_order: string; // Relation ID
-    product: string; // Relation ID
-    quantity_ordered: number;
-    quantity_received: number;
-    unit_cost: number;
-    total: number;
-}
-
-export interface StockAdjustment extends RecordModel {
-    product: string; // Relation ID
-    adjustment_type: 'increase' | 'decrease';
-    quantity: number;
-    reason: 'damage' | 'loss' | 'found' | 'correction' | 'return' | 'other';
-    notes: string;
-    adjusted_by: string; // Relation ID
-    previous_stock: number;
-    new_stock: number;
-}
+// Type guards for runtime type checking
+export const isUser = (data: unknown): data is User => ValidationSchemas.User.safeParse(data).success;
+export const isProduct = (data: unknown): data is Product => ValidationSchemas.Product.safeParse(data).success;
+export const isSale = (data: unknown): data is Sale => ValidationSchemas.Sale.safeParse(data).success;
+export const isPurchaseOrder = (data: unknown): data is PurchaseOrder => ValidationSchemas.PurchaseOrder.safeParse(data).success;
+export const isSupplier = (data: unknown): data is Supplier => ValidationSchemas.Supplier.safeParse(data).success;

@@ -1,0 +1,115 @@
+migrate((app) => {
+  // Create transaction log collection for tracking batch operations
+  const transactionLogCollection = new Collection({
+    name: 'transaction_logs',
+    type: 'base',
+    listRule: '@request.auth.id != ""',
+    viewRule: '@request.auth.id != ""',
+    createRule: '@request.auth.id != ""',
+    updateRule: '@request.auth.role != "cashier"',
+    deleteRule: '@request.auth.role = "admin"',
+    fields: [
+      { name: 'transaction_id', type: 'text', required: true },
+      {
+        name: 'operation_type',
+        type: 'select',
+        required: true,
+        values: ['batch_create', 'batch_update', 'batch_delete', 'sale_transaction']
+      },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        values: ['pending', 'processing', 'completed', 'failed', 'rollback']
+      },
+      { name: 'collection_name', type: 'text', required: true },
+      { name: 'operation_count', type: 'number', required: true },
+      { name: 'data', type: 'json' },
+      { name: 'error_message', type: 'text' },
+      { name: 'started_at', type: 'date' },
+      { name: 'completed_at', type: 'date' },
+      { name: 'created_by', type: 'relation', collectionId: '_pb_users_auth_', maxSelect: 1 },
+    ],
+    indexes: [
+      'CREATE INDEX idx_transaction_logs_status ON transaction_logs (status);',
+      'CREATE UNIQUE INDEX idx_transaction_logs_transaction_id ON transaction_logs (transaction_id);',
+      'CREATE INDEX idx_transaction_logs_created_by ON transaction_logs (created_by);',
+    ],
+  });
+  app.save(transactionLogCollection);
+
+  // Create transaction items collection for detailed operation tracking
+  const transactionItemsCollection = new Collection({
+    name: 'transaction_items',
+    type: 'base',
+    listRule: '@request.auth.id != ""',
+    viewRule: '@request.auth.id != ""',
+    createRule: '@request.auth.id != ""',
+    updateRule: '@request.auth.role != "cashier"',
+    deleteRule: '@request.auth.role = "admin"',
+    fields: [
+      { name: 'transaction_log', type: 'relation', required: true, collectionId: transactionLogCollection.id, maxSelect: 1, cascadeDelete: true },
+      {
+        name: 'operation_type',
+        type: 'select',
+        required: true,
+        values: ['create', 'update', 'delete']
+      },
+      { name: 'collection_name', type: 'text', required: true },
+      { name: 'record_id', type: 'text', required: true },
+      { name: 'old_data', type: 'json' },
+      { name: 'new_data', type: 'json' },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        values: ['pending', 'applied', 'failed', 'rolled_back']
+      },
+      { name: 'error_message', type: 'text' },
+      { name: 'sequence_order', type: 'number', required: true },
+    ],
+    indexes: [
+      'CREATE INDEX idx_transaction_items_transaction_log ON transaction_items (transaction_log);',
+      'CREATE INDEX idx_transaction_items_status ON transaction_items (status);',
+      'CREATE INDEX idx_transaction_items_sequence ON transaction_items (sequence_order);',
+    ],
+  });
+  app.save(transactionItemsCollection);
+
+}, (app) => {
+  // Rollback migration
+  try {
+    const transactionLogCollection = db.findCollectionByNameOrId('transaction_logs');
+    if (transactionLogCollection) {
+      db.dropCollection(transactionLogCollection);
+    }
+  } catch (error) {
+    console.warn('Could not drop transaction_logs collection:', error);
+  }
+
+  try {
+    const transactionItemsCollection = db.findCollectionByNameOrId('transaction_items');
+    if (transactionItemsCollection) {
+      db.dropCollection(transactionItemsCollection);
+    }
+  } catch (error) {
+    console.warn('Could not drop transaction_items collection:', error);
+  }
+
+  // Remove transaction fields from collections
+  const collections = ['products', 'sales', 'purchase_orders', 'suppliers', 'categories'];
+
+  collections.forEach(collectionName => {
+    try {
+      const collection = db.findCollectionByNameOrId(collectionName);
+      if (collection) {
+        collection.schema = collection.schema.filter(field =>
+          field.name !== 'transaction_id' && field.name !== 'transaction_status'
+        );
+        db.saveCollection(collection);
+      }
+    } catch (error) {
+      console.warn(`Could not rollback collection ${collectionName}:`, error);
+    }
+  });
+});

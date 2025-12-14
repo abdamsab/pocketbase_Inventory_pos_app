@@ -6,10 +6,10 @@ export function usePurchaseOrders() {
     return useQuery({
         queryKey: ['purchase_orders'],
         queryFn: async () => {
-            return await pb.collection('purchase_orders').getFullList<PurchaseOrder>({
-                sort: '-created',
-                expand: 'supplier,created_by',
+            const result = await pb.collection('purchase_orders').getList<PurchaseOrder>(1, 100, {
+                sort: '-po_number', // Sort by po_number instead of created
             });
+            return result.items;
         },
     });
 }

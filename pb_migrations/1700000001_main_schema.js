@@ -134,6 +134,8 @@ migrate((app) => {
         updateRule: "@request.auth.role != 'cashier'",
         deleteRule: "@request.auth.role = 'admin'",
         fields: [
+            { name: "created", type: "date", system: true },
+            { name: "updated", type: "date", system: true },
             { name: "sale_number", type: "text", required: true },
             { name: "user", type: "relation", required: true, collectionId: users.id, maxSelect: 1 },
             { name: "location", type: "relation", collectionId: locations.id, maxSelect: 1 },

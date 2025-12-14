@@ -1,72 +1,60 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCartStore } from '../../stores/cartStore';
 import { useAuthStore } from '../../stores/authStore';
-import { pb } from '../../lib/pocketbase';
-import { X, Loader2, CheckCircle, CreditCard, Banknote } from 'lucide-react';
+import { useSaleTransaction } from '../../hooks/useSaleTransaction';
+import { offlineManager } from '../../lib/offlineManager';
+import { X, Loader2, CheckCircle, CreditCard, Banknote, AlertCircle, Wifi, WifiOff, Landmark } from 'lucide-react';
 
 interface PaymentModalProps {
     onClose: () => void;
 }
 
 export function PaymentModal({ onClose }: PaymentModalProps) {
-    const { items, total, clearCart } = useCartStore();
+    const navigate = useNavigate();
+    const { total } = useCartStore();
     const { user } = useAuthStore();
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
-    const [loading, setLoading] = useState(false);
-    const [success, setSuccess] = useState(false);
+    const createSale = useSaleTransaction();
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
+    const offlineStatus = offlineManager.getStatus();
 
     const processSale = async () => {
         if (!user) return;
-        setLoading(true);
+
+        // Prepare sale data according to the expected format
+        const now = new Date().toISOString();
+        const saleData = {
+            sale_number: `SALE-${Date.now()}`,
+            user: user.id,
+            location: user.location || null, // Handle missing location
+            subtotal: total(), // Required field
+            tax: 0, // Optional, default to 0
+            discount: 0, // Optional, default to 0
+            total: total(),
+            payment_method: paymentMethod as 'cash' | 'card' | 'mobile',
+            status: 'completed' as const,
+            notes: undefined, // Optional
+            created: now, // Add timestamp
+            updated: now, // Add timestamp
+        };
 
         try {
-            const saleData = {
-                sale_number: `SALE-${Date.now()}`,
-                user: user.id,
-                location: user.location,
-                total: total(),
-                payment_method: paymentMethod,
-                status: 'completed',
-            };
-            const sale = await pb.collection('sales').create(saleData);
+            await createSale.mutateAsync(saleData);
 
-            for (const item of items) {
-                await pb.collection('sales_items').create({
-                    sale: sale.id,
-                    product: item.id,
-                    quantity: item.quantity,
-                    unit_price: item.sale_price,
-                    line_total: item.sale_price * item.quantity,
-                });
-
-                const newStock = item.stock - item.quantity;
-                await pb.collection('products').update(item.id, {
-                    stock: newStock >= 0 ? newStock : 0,
-                });
-            }
-
-            await pb.collection('receipts').create({
-                sale: sale.id,
-                receipt_number: `REC-${Date.now()}`,
-                content: { items, total: total(), date: new Date().toISOString() },
-            });
-
-            setSuccess(true);
-            clearCart();
-
-            setTimeout(() => {
-                onClose();
-            }, 2000);
+            // Success is handled by the mutation, cart is already cleared
+            // Modal stays open until user explicitly closes it
+            // User can choose to print receipt or continue
 
         } catch (error) {
-            console.error('Sale failed:', error);
-            alert('Failed to process sale. Please try again.');
-        } finally {
-            setLoading(false);
+            console.error('Sale transaction failed:', error);
+            // Error handling is done by the useSaleTransaction hook
         }
     };
 
-    if (success) {
+    // Check if the transaction was successful
+    const isSuccess = createSale.isSuccess;
+
+    if (isSuccess) {
         return (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
                 <div className="bg-surface border border-white/10 p-8 rounded-2xl shadow-2xl text-center max-w-sm w-full transform scale-100 transition-all">
@@ -74,7 +62,26 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
                         <CheckCircle className="text-secondary" size={32} />
                     </div>
                     <h2 className="text-2xl font-heading font-bold text-white mb-2">Sale Completed!</h2>
-                    <p className="text-text-muted">Receipt has been generated.</p>
+                    <p className="text-text-muted mb-6">Transaction processed successfully.</p>
+                    <div className="space-y-3">
+                        <button
+                            onClick={() => {
+                                if (createSale.data) {
+                                    onClose(); // Close modal first
+                                    navigate(`/sales/${createSale.data.id}`);
+                                }
+                            }}
+                            className="w-full bg-primary text-white py-3 px-4 rounded-lg font-medium hover:bg-primaryHover transition-colors"
+                        >
+                            🖨️ Print Receipt
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="w-full bg-surfaceHighlight text-text-main py-3 px-4 rounded-lg font-medium hover:bg-surface transition-colors"
+                        >
+                            Continue
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -92,11 +99,26 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
                 </div>
 
                 <div className="p-6 space-y-8">
+                    {/* Connection Status */}
+                    <div className="flex items-center justify-center gap-2 py-2">
+                        {offlineStatus.isOnline ? (
+                            <>
+                                <Wifi className="w-4 h-4 text-green-400" />
+                                <span className="text-xs text-green-400">Online</span>
+                            </>
+                        ) : (
+                            <>
+                                <WifiOff className="w-4 h-4 text-yellow-400" />
+                                <span className="text-xs text-yellow-400">Offline - Will sync when online</span>
+                            </>
+                        )}
+                    </div>
+
                     {/* Total Display */}
                     <div className="text-center py-8 bg-background/50 rounded-2xl border border-white/5 relative overflow-hidden group">
                         <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors"></div>
                         <p className="text-text-muted text-sm mb-2 relative z-10">Total Amount</p>
-                        <p className="text-5xl font-heading font-bold text-white relative z-10 tracking-tight">
+                        <p className="text-5xl font-heading font-bold text-primary relative z-10 tracking-tight">
                             ${total().toFixed(2)}
                         </p>
                     </div>
@@ -104,37 +126,60 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
                     {/* Payment Method */}
                     <div>
                         <label className="block text-sm font-medium text-text-muted mb-4">Select Payment Method</label>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-3 gap-3">
                             <button
                                 onClick={() => setPaymentMethod('cash')}
                                 className={`p-4 rounded-xl border-2 flex flex-col items-center gap-3 transition-all duration-200 ${paymentMethod === 'cash'
-                                        ? 'border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10'
-                                        : 'border-white/10 hover:border-white/20 text-text-muted hover:bg-white/5'
+                                    ? 'border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10'
+                                    : 'border-white/10 hover:border-white/20 text-text-muted hover:bg-white/5'
                                     }`}
                             >
                                 <Banknote size={24} />
-                                <span className="font-medium">Cash</span>
+                                <span className="font-medium text-sm">Cash</span>
                             </button>
                             <button
                                 onClick={() => setPaymentMethod('card')}
                                 className={`p-4 rounded-xl border-2 flex flex-col items-center gap-3 transition-all duration-200 ${paymentMethod === 'card'
-                                        ? 'border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10'
-                                        : 'border-white/10 hover:border-white/20 text-text-muted hover:bg-white/5'
+                                    ? 'border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10'
+                                    : 'border-white/10 hover:border-white/20 text-text-muted hover:bg-white/5'
                                     }`}
                             >
                                 <CreditCard size={24} />
-                                <span className="font-medium">Card</span>
+                                <span className="font-medium text-sm">Card</span>
+                            </button>
+                            <button
+                                onClick={() => setPaymentMethod('bank_transfer' as any)}
+                                className={`p-4 rounded-xl border-2 flex flex-col items-center gap-3 transition-all duration-200 ${paymentMethod === 'bank_transfer'
+                                    ? 'border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10'
+                                    : 'border-white/10 hover:border-white/20 text-text-muted hover:bg-white/5'
+                                    }`}
+                            >
+                                <Landmark size={24} />
+                                <span className="font-medium text-sm">Bank</span>
                             </button>
                         </div>
                     </div>
 
+                    {/* Error Display */}
+                    {createSale.isError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center animate-shake">
+                            <div className="flex flex-col items-center justify-center gap-2 text-danger">
+                                <AlertCircle size={32} strokeWidth={2.5} />
+                                <span className="font-bold text-lg">Transaction Failed</span>
+                                <span className="text-sm font-medium">
+                                    {(createSale.error as Error)?.message || 'Something went wrong. Please try again.'}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Action Button */}
                     <button
                         onClick={processSale}
-                        disabled={loading}
+                        disabled={createSale.isPending}
                         className="w-full bg-gradient-to-r from-primary to-primaryHover text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
-                        {loading ? (
+                        {createSale.isPending ? (
                             <>
                                 <Loader2 className="animate-spin" size={24} />
                                 Processing...

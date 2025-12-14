@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexusPOS - Offline</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            overflow-x: hidden;
+        }
+
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 500px;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.8;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        p {
+            font-size: 1.1rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+
+        .status {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .retry-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .retry-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+        }
+
+        .features {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: left;
+            backdrop-filter: blur(10px);
+        }
+
+        .features h3 {
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .features li {
+            margin-bottom: 0.5rem;
+            opacity: 0.9;
+            display: flex;
+            align-items: center;
+        }
+
+        .features li:before {
+            content: '✓';
+            color: #4ade80;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .connection-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .connection-indicator:before {
+            content: '●';
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-indicator">
+        <span>Offline</span>
+    </div>
+
+    <div class="container">
+        <div class="icon pulse">📱</div>
+
+        <h1>You're Offline</h1>
+
+        <p>
+            No internet connection detected. Don't worry - some features are still available offline.
+            Your work will sync automatically when connection is restored.
+        </p>
+
+        <div class="status">
+            <strong>Connection Status:</strong> Offline<br>
+            <small>Last sync: <span id="lastSync">Checking...</span></small>
+        </div>
+
+        <button class="retry-btn" onclick="window.location.reload()">
+            🔄 Check Connection
+        </button>
+
+        <div class="features">
+            <h3>Available Offline:</h3>
+            <ul>
+                <li>View cached product data</li>
+                <li>Access recent sales history</li>
+                <li>Continue with pending transactions</li>
+                <li>View dashboard with cached data</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Check connection status periodically
+        function updateConnectionStatus() {
+            const indicator = document.querySelector('.connection-indicator');
+
+            if (navigator.onLine) {
+                indicator.style.background = 'rgba(34, 197, 94, 0.9)';
+                indicator.innerHTML = '<span>● Online</span>';
+                indicator.querySelector('span').textContent = 'Online';
+            } else {
+                indicator.style.background = 'rgba(239, 68, 68, 0.9)';
+                indicator.innerHTML = '<span>● Offline</span>';
+                indicator.querySelector('span').textContent = 'Offline';
+            }
+        }
+
+        // Update last sync time from localStorage if available
+        function updateLastSync() {
+            try {
+                const lastSync = localStorage.getItem('lastSync');
+                const lastSyncElement = document.getElementById('lastSync');
+
+                if (lastSync) {
+                    const date = new Date(lastSync);
+                    lastSyncElement.textContent = date.toLocaleString();
+                } else {
+                    lastSyncElement.textContent = 'Never';
+                }
+            } catch (error) {
+                document.getElementById('lastSync').textContent = 'Unknown';
+            }
+        }
+
+        // Check connection on load and periodically
+        updateConnectionStatus();
+        updateLastSync();
+
+        setInterval(updateConnectionStatus, 30000); // Check every 30 seconds
+
+        // Listen for online/offline events
+        window.addEventListener('online', updateConnectionStatus);
+        window.addEventListener('offline', updateConnectionStatus);
+
+        // Auto-reload when coming back online (after 5 seconds)
+        window.addEventListener('online', () => {
+            setTimeout(() => {
+                if (navigator.onLine) {
+                    window.location.reload();
+                }
+            }, 5000);
+        });
+    </script>
+</body>
+</html>

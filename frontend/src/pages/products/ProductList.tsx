@@ -1,18 +1,31 @@
-import { useProducts } from '../../hooks/useProducts';
 import { useCategories } from '../../hooks/useCategories';
+import { useProducts } from '../../hooks/useProducts';
 import { pb } from '../../lib/pocketbase';
+import type { Product } from '../../types';
 import { Plus, Search, Edit, Trash2, Package, AlertTriangle, ScanBarcode } from 'lucide-react';
 import { useState } from 'react';
 import { ProductForm } from './ProductForm';
 import { BarcodeModal } from './BarcodeModal';
 
+type ModalMode = 'create' | 'add-stock' | 'edit-pricing';
+
 export function ProductList() {
-    const { data: products, isLoading, refetch } = useProducts();
     const { data: categories } = useCategories();
+    const { data: products, isLoading, error, refetch } = useProducts();
     const [isFormOpen, setIsFormOpen] = useState(false);
-    const [editingProduct, setEditingProduct] = useState<any>(null);
-    const [viewBarcodeProduct, setViewBarcodeProduct] = useState<any>(null);
+    const [modalMode, setModalMode] = useState<ModalMode>('create');
+    const [editingProduct, setEditingProduct] = useState<Product | undefined>(undefined);
+    const [viewBarcodeProduct, setViewBarcodeProduct] = useState<Product | undefined>(undefined);
     const [search, setSearch] = useState('');
+
+    // Debug logging
+    console.log('ProductList Debug:', {
+        products,
+        isLoading,
+        error,
+        productsLength: products?.length,
+        categoriesLength: categories?.length
+    });
 
     const handleDelete = async (id: string) => {
         if (confirm('Are you sure you want to delete this product?')) {
@@ -23,12 +36,22 @@ export function ProductList() {
 
     const filteredProducts = products?.filter(p =>
         p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.sku.toLowerCase().includes(search.toLowerCase())
-    );
+        p.sku.toLowerCase().includes(search.toLowerCase()) ||
+        p.barcode?.toLowerCase().includes(search.toLowerCase())
+    ) || [];
 
     if (isLoading) return (
         <div className="flex items-center justify-center h-64 text-primary">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-current"></div>
+        </div>
+    );
+
+    if (error) return (
+        <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+                <div className="text-danger text-lg font-semibold mb-2">Error loading products</div>
+                <div className="text-text-muted">{error.message}</div>
+            </div>
         </div>
     );
 
@@ -39,13 +62,30 @@ export function ProductList() {
                     <h2 className="text-2xl font-heading font-bold text-text-main">Inventory</h2>
                     <p className="text-text-muted">Manage your products and stock levels</p>
                 </div>
-                <button
-                    onClick={() => { setEditingProduct(null); setIsFormOpen(true); }}
-                    className="btn-primary flex items-center gap-2"
-                >
-                    <Plus size={20} />
-                    Add Product
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => {
+                            setModalMode('create');
+                            setEditingProduct(undefined);
+                            setIsFormOpen(true);
+                        }}
+                        className="btn-primary flex items-center gap-2"
+                    >
+                        <Plus size={20} />
+                        New Product
+                    </button>
+                    <button
+                        onClick={() => {
+                            setModalMode('add-stock');
+                            setEditingProduct(undefined);
+                            setIsFormOpen(true);
+                        }}
+                        className="btn-secondary flex items-center gap-2"
+                    >
+                        <Package size={20} />
+                        Add Product
+                    </button>
+                </div>
             </div>
 
             <div className="bg-surface border border-border rounded-2xl shadow-lg overflow-hidden">
@@ -111,9 +151,13 @@ export function ProductList() {
                                     <td className="px-6 py-4 text-right">
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
-                                                onClick={() => { setEditingProduct(product); setIsFormOpen(true); }}
+                                                onClick={() => {
+                                                    setModalMode('edit-pricing');
+                                                    setEditingProduct(product);
+                                                    setIsFormOpen(true);
+                                                }}
                                                 className="p-2 hover:bg-primary/10 text-text-muted hover:text-primary rounded-lg transition-colors"
-                                                title="Edit Product"
+                                                title="Edit Pricing"
                                             >
                                                 <Edit size={18} />
                                             </button>
@@ -144,6 +188,7 @@ export function ProductList() {
                     <div className="bg-surface border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                         <ProductForm
                             product={editingProduct}
+                            mode={modalMode}
                             onClose={() => setIsFormOpen(false)}
                             onSuccess={() => { setIsFormOpen(false); refetch(); }}
                         />
@@ -154,7 +199,7 @@ export function ProductList() {
             {viewBarcodeProduct && (
                 <BarcodeModal
                     product={viewBarcodeProduct}
-                    onClose={() => setViewBarcodeProduct(null)}
+                    onClose={() => setViewBarcodeProduct(undefined)}
                 />
             )}
         </div>
