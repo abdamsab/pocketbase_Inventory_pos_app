@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { pbValidated, pb } from '../lib/pocketbase';
 import { useCartStore } from '../stores/cartStore';
 import type { SaleCreateData } from '../lib/pocketbase';
+import { useLocation } from '../contexts/LocationContext';
+import { useAuthStore } from '../stores/authStore';
 
 // Transaction queue for failed operations
 interface FailedTransaction {
@@ -186,9 +188,14 @@ setInterval(() => {
 export function useSaleTransaction() {
   const queryClient = useQueryClient();
   const { clearCart, createBackup, rollbackCart, items: cartItems } = useCartStore();
+  const { activeLocation } = useLocation(); // Get active location
+  const { user } = useAuthStore(); // Get current user
 
   const mutation = useMutation({
     mutationFn: async (saleData: SaleCreateData) => {
+      if (!activeLocation) throw new Error("No active location selected for this transaction.");
+      if (!user) throw new Error("No authenticated user.");
+
       try {
         // Create backup before clearing cart for rollback capability
         createBackup();
@@ -200,14 +207,29 @@ export function useSaleTransaction() {
         // CRITICAL STEP: PRE-VALIDATE STOCK
         // We must check stock availability BEFORE creating the sale record.
         // ----------------------------------------------------------------
-        console.log('Validating stock levels before sale creation...');
+        console.log(`Validating stock levels at ${activeLocation.name} before sale creation...`);
+
+        // Cache inventory records to avoid double fetching
+        const inventoryRecords: Record<string, any> = {};
+
         for (const cartItem of cartItems) {
           try {
-            const product = await pb.collection('products').getOne(cartItem.id);
-            if (product.stock < cartItem.quantity) {
-              throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${cartItem.quantity}`);
+            // Find inventory record for this product at this location
+            // Use getFirstListItem which throws if not found
+            const inventory = await pb.collection('inventory').getFirstListItem(`product="${cartItem.id}" && location="${activeLocation.id}"`);
+
+            if (inventory.quantity < cartItem.quantity) {
+              // Get product name for better error message
+              const product = await pb.collection('products').getOne(cartItem.id);
+              throw new Error(`Insufficient stock for ${product.name}. Available: ${inventory.quantity}, Requested: ${cartItem.quantity}`);
             }
-          } catch (err) {
+            inventoryRecords[cartItem.id] = inventory;
+
+          } catch (err: any) {
+            if (err.status === 404) {
+              const product = await pb.collection('products').getOne(cartItem.id);
+              throw new Error(`No stock record found for ${product.name} at this location.`);
+            }
             // If validation fails, we must restore the cart since we cleared it optimistically
             rollbackCart();
             throw err; // Re-throw to stop transaction
@@ -215,8 +237,15 @@ export function useSaleTransaction() {
         }
         console.log('Stock validation passed.');
 
+        // Enforce location and user on the sale data
+        const finalSaleData = {
+          ...saleData,
+          location: activeLocation.id,
+          user: user.id
+        };
+
         // Create sale record with validation
-        const sale = await pbValidated.createSale(saleData);
+        const sale = await pbValidated.createSale(finalSaleData);
 
         // Create sale items (line items) for each cart item
         try {
@@ -228,6 +257,8 @@ export function useSaleTransaction() {
               quantity: cartItem.quantity,
               unit_price: cartItem.sale_price,
               total: cartItem.sale_price * cartItem.quantity,
+              location: activeLocation.id, // Add location
+              user: user.id, // Add user
               created: now,
               updated: now,
             });
@@ -242,38 +273,35 @@ export function useSaleTransaction() {
         try {
           console.log('Starting inventory tracking for sale:', sale.id, 'with items:', cartItems.length);
           for (const cartItem of cartItems) {
-            console.log(`Processing cart item: ${cartItem.name} (ID: ${cartItem.id})`);
+            const inventory = inventoryRecords[cartItem.id];
 
-            // Get current product data to check stock
-            const product = await pb.collection('products').getOne(cartItem.id);
-            console.log(`Product ${cartItem.name} current stock: ${product.stock}`);
-
-            // Validate sufficient stock
-            if (product.stock < cartItem.quantity) {
-              throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${cartItem.quantity}`);
+            // Validate sufficient stock (again, just in case, though pre-validation should catch it)
+            if (inventory.quantity < cartItem.quantity) {
+              // Should not happen if pre-validation worked
+              throw new Error(`Insufficient stock during update.`);
             }
 
-            // Update product stock level
-            const newStock = product.stock - cartItem.quantity;
-            console.log(`Updating ${cartItem.name} stock: ${product.stock} → ${newStock}`);
-            await pb.collection('products').update(cartItem.id, {
-              stock: newStock
+            // Update inventory stock level
+            const newStock = inventory.quantity - cartItem.quantity;
+            console.log(`Updating inventory for item ${cartItem.id}: ${inventory.quantity} → ${newStock}`);
+
+            await pb.collection('inventory').update(inventory.id, {
+              quantity: newStock
             });
 
             // Create inventory entry for audit trail
-            console.log(`Creating inventory entry for ${cartItem.name}`);
             const now = new Date().toISOString();
             await pb.collection('inventory_entries').create({
               product: cartItem.id,
+              location: activeLocation.id,
+              user: user.id,
               type: 'sale',
               quantity: -cartItem.quantity, // Negative for stock reduction
-              reference_id: sale.sale_number, // Use readable sale number instead of UUID
+              reference_id: sale.sale_number,
               notes: `Sale ${sale.sale_number} - ${cartItem.name}`,
               created: now,
               updated: now,
             });
-
-            console.log(`✅ Inventory updated for ${cartItem.name}: ${product.stock} → ${newStock}`);
           }
           console.log('✅ Inventory tracking completed successfully');
         } catch (inventoryError) {
@@ -301,11 +329,15 @@ export function useSaleTransaction() {
         // Also invalidate queries as fallback
         queryClient.invalidateQueries({ queryKey: ['cart'] });
 
-        // Queue transaction for retry
-        transactionQueue.add({
-          data: saleData,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
+        // Queue transaction for retry (if network error or similar? Logic needs to be careful not to retry stock errors)
+        // If error contains "Insufficient stock", DO NOT RETRY automatically.
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        if (!errorMessage.includes("Insufficient stock") && !errorMessage.includes("No stock record")) {
+          transactionQueue.add({
+            data: saleData,
+            error: errorMessage,
+          });
+        }
 
         // Re-throw error for user feedback
         throw error;
@@ -315,7 +347,7 @@ export function useSaleTransaction() {
     onSuccess: (data) => {
       // Invalidate and refetch relevant queries
       queryClient.invalidateQueries({ queryKey: ['sales'] });
-      queryClient.invalidateQueries({ queryKey: ['products'] }); // For stock updates
+      queryClient.invalidateQueries({ queryKey: ['products'] }); // For stock updates (merged view)
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
 
       // Emit success event

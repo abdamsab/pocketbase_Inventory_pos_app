@@ -2,9 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCartStore } from '../../stores/cartStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useLocation } from '../../contexts/LocationContext';
 import { useSaleTransaction } from '../../hooks/useSaleTransaction';
 import { offlineManager } from '../../lib/offlineManager';
-import { X, Loader2, CheckCircle, CreditCard, Banknote, AlertCircle, Wifi, WifiOff, Landmark } from 'lucide-react';
+import { X, Loader2, CheckCircle, CreditCard, Banknote, AlertCircle, Wifi, WifiOff, Landmark, User, Search } from 'lucide-react';
+import { pb } from '../../lib/pocketbase';
+import type { Customer } from '../../types';
 
 interface PaymentModalProps {
     onClose: () => void;
@@ -14,19 +17,51 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
     const navigate = useNavigate();
     const { total } = useCartStore();
     const { user } = useAuthStore();
+    const { activeLocation } = useLocation(); // Use active location context
     const createSale = useSaleTransaction();
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
     const offlineStatus = offlineManager.getStatus();
 
+    // Customer State
+    const [customerSearch, setCustomerSearch] = useState('');
+    const [searchedCustomers, setSearchedCustomers] = useState<Customer[]>([]);
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
+
+    // Search Customers
+    const handleCustomerSearch = async (query: string) => {
+        setCustomerSearch(query);
+        if (query.length < 2) {
+            setSearchedCustomers([]);
+            return;
+        }
+
+        setIsSearchingCustomers(true);
+        try {
+            const result = await pb.collection('customers').getList<Customer>(1, 5, {
+                filter: `name ~ "${query}" || email ~ "${query}" || phone ~ "${query}"`,
+            });
+            setSearchedCustomers(result.items);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSearchingCustomers(false);
+        }
+    };
+
     const processSale = async () => {
         if (!user) return;
+        if (!activeLocation) {
+            alert("No active location selected. Cannot process sale.");
+            return;
+        }
 
         // Prepare sale data according to the expected format
         const now = new Date().toISOString();
         const saleData = {
             sale_number: `SALE-${Date.now()}`,
             user: user.id,
-            location: user.location || null, // Handle missing location
+            location: activeLocation.id, // Correct: Use active location
             subtotal: total(), // Required field
             tax: 0, // Optional, default to 0
             discount: 0, // Optional, default to 0
@@ -34,20 +69,16 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
             payment_method: paymentMethod as 'cash' | 'card' | 'mobile',
             status: 'completed' as const,
             notes: undefined, // Optional
+            customer: selectedCustomer?.id, // Add customer
             created: now, // Add timestamp
             updated: now, // Add timestamp
         };
 
         try {
             await createSale.mutateAsync(saleData);
-
-            // Success is handled by the mutation, cart is already cleared
-            // Modal stays open until user explicitly closes it
-            // User can choose to print receipt or continue
-
+            // Success is handled by the mutation
         } catch (error) {
             console.error('Sale transaction failed:', error);
-            // Error handling is done by the useSaleTransaction hook
         }
     };
 
@@ -55,6 +86,7 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
     const isSuccess = createSale.isSuccess;
 
     if (isSuccess) {
+        // ... (Keep existing success UI)
         return (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
                 <div className="bg-surface border border-white/10 p-8 rounded-2xl shadow-2xl text-center max-w-sm w-full transform scale-100 transition-all">
@@ -98,7 +130,58 @@ export function PaymentModal({ onClose }: PaymentModalProps) {
                     </button>
                 </div>
 
-                <div className="p-6 space-y-8">
+                <div className="p-6 space-y-8 overflow-y-auto">
+
+                    {/* Customer Selection */}
+                    <div>
+                        <label className="block text-sm font-medium text-text-muted mb-2">Customer (Optional)</label>
+                        {selectedCustomer ? (
+                            <div className="flex items-center justify-between p-3 bg-primary/10 border border-primary/20 rounded-xl">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary">
+                                        <User size={16} />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-medium text-white">{selectedCustomer.name}</p>
+                                        <p className="text-xs text-primary/80">{selectedCustomer.phone || selectedCustomer.email}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setSelectedCustomer(null)} className="text-text-muted hover:text-white">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
+                                <input
+                                    type="text"
+                                    placeholder="Search name, email or phone..."
+                                    className="w-full bg-surfaceHighlight border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-text-main placeholder-text-muted focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50"
+                                    value={customerSearch}
+                                    onChange={(e) => handleCustomerSearch(e.target.value)}
+                                />
+                                {searchedCustomers.length > 0 && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-white/10 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto">
+                                        {searchedCustomers.map(c => (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => {
+                                                    setSelectedCustomer(c);
+                                                    setCustomerSearch('');
+                                                    setSearchedCustomers([]);
+                                                }}
+                                                className="w-full text-left p-3 hover:bg-white/5 flex items-center justify-between border-b border-white/5 last:border-0"
+                                            >
+                                                <span className="text-sm text-white">{c.name}</span>
+                                                <span className="text-xs text-text-muted">{c.phone}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Connection Status */}
                     <div className="flex items-center justify-center gap-2 py-2">
                         {offlineStatus.isOnline ? (

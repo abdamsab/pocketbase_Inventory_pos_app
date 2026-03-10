@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileSpreadsheet, FileText, Download, Calendar, TrendingUp, Package, ShoppingCart, BarChart3, Search, ChevronRight, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { pb } from '../../lib/pocketbase';
 import { exportData } from '../../utils/export';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { useLocation } from '../../contexts/LocationContext';
+import { useAuthStore } from '../../stores/authStore';
 
 type ReportType = 'sales' | 'inventory' | 'purchase';
 
@@ -40,6 +42,7 @@ function SummaryCard({ title, value, description, icon: Icon, color }: SummaryCa
 }
 
 export function Reports() {
+    const { activeLocation } = useLocation();
     const [reportType, setReportType] = useState<ReportType>('sales');
     const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -49,6 +52,13 @@ export function Reports() {
     const [reportData, setReportData] = useState<any[]>([]);
     const [summaryData, setSummaryData] = useState<any>(null);
     const [generatedType, setGeneratedType] = useState<ReportType | null>(null);
+
+    // Reset data when location changes
+    useEffect(() => {
+        setReportData([]);
+        setSummaryData(null);
+        setGeneratedType(null);
+    }, [activeLocation]);
 
     const setDateRange = (range: 'today' | 'week' | 'month' | 'quarter') => {
         const today = new Date();
@@ -75,11 +85,42 @@ export function Reports() {
         }
     };
 
+    const { user } = useAuthStore(); // Added import for user
+
+    // Helper to get location filter
+    const getLocationFilter = () => {
+        if (!activeLocation) return 'location="invalid"';
+
+        if (activeLocation === 'all') {
+            if (user?.superuser) return ''; // No location filter = all
+
+            // For regular managers with multiple locations:
+            if (user?.locations && user.locations.length > 0) {
+                return user.locations.map(id => `location="${id}"`).join(' || ');
+            }
+            return 'location="invalid"'; // Should not happen if they selected 'all'
+        }
+
+        // Specific location
+        return `location="${activeLocation.id}"`;
+    };
+
     const fetchSalesReport = async () => {
+        if (!activeLocation) return;
         setIsGenerating(true);
         try {
+            const locFilter = getLocationFilter();
+            // Filter: Date range AND Location (if ref exists)
+            // Note: If locFilter is empty (superuser all), we only filter by date.
+            // If locFilter contains ORs, we need parenthesis: `created >= ... && (locA || locB)`
+
+            let filter = `created >= "${startDate}" && created <= "${endDate} 23:59:59"`;
+            if (locFilter) {
+                filter += ` && (${locFilter})`;
+            }
+
             const sales = await pb.collection('sales').getFullList({
-                filter: `created >= "${startDate}" && created <= "${endDate} 23:59:59"`,
+                filter,
                 expand: 'user,location',
                 sort: '-created',
                 requestKey: null
@@ -128,33 +169,44 @@ export function Reports() {
     };
 
     const fetchInventoryReport = async () => {
+        if (!activeLocation) return;
         setIsGenerating(true);
         try {
-            const products = await pb.collection('products').getFullList({
-                expand: 'category',
-                sort: 'name',
+            const locFilter = getLocationFilter();
+
+            // Fetch Inventory
+            const inventoryRecords = await pb.collection('inventory').getFullList({
+                filter: locFilter, // Empty for superuser all, or (loc || loc)
+                expand: 'product.category,location',
+                sort: '-quantity', // Most stock first
                 requestKey: null
             });
 
-            const rows = products.map(product => ({
-                id: product.id,
-                sku: product.sku,
-                name: product.name,
-                category: product.expand?.category?.name || 'N/A',
-                stock: product.stock,
-                reorder_point: product.reorder_point || 0,
-                cost_price: product.cost_price,
-                sale_price: product.sale_price,
-                value: product.stock * product.cost_price,
-                status: product.stock <= (product.reorder_point || 0) ? 'LOW STOCK' : 'OK',
-            }));
+            const rows = inventoryRecords.map(inv => {
+                const product = inv.expand?.product;
+                if (!product) return null; // Should not happen
+
+                return {
+                    id: product.id,
+                    sku: product.sku,
+                    name: product.name,
+                    category: product.expand?.category?.name || 'N/A',
+                    stock: inv.quantity,
+                    reorder_point: inv.reorder_point || 0,
+                    cost_price: product.cost_price,
+                    sale_price: product.sale_price,
+                    value: inv.quantity * (product.cost_price || 0),
+                    status: inv.quantity <= (inv.reorder_point || 0) ? 'LOW STOCK' : 'OK',
+                    locationName: inv.expand?.location?.name || 'N/A' // Add location column possibility?
+                };
+            }).filter(Boolean); // Remove nulls
 
             // Summary
-            const totalValue = rows.reduce((sum, r) => sum + r.value, 0);
-            const lowStockCount = rows.filter(r => r.status === 'LOW STOCK').length;
-            const totalItems = rows.reduce((sum, r) => sum + r.stock, 0);
+            const totalValue = rows.reduce((sum: number, r: any) => sum + r.value, 0);
+            const lowStockCount = rows.filter((r: any) => r.status === 'LOW STOCK').length;
+            const totalItems = rows.reduce((sum: number, r: any) => sum + r.stock, 0);
 
-            setReportData(rows);
+            setReportData(rows as any[]);
             setSummaryData({
                 totalValue,
                 lowStockCount,
@@ -170,11 +222,19 @@ export function Reports() {
     };
 
     const fetchPurchaseReport = async () => {
+        if (!activeLocation) return;
         setIsGenerating(true);
         try {
+            const locFilter = getLocationFilter();
+
+            let filter = `order_date >= "${startDate}" && order_date <= "${endDate} 23:59:59"`;
+            if (locFilter) {
+                filter += ` && (${locFilter})`;
+            }
+
             const purchaseOrders = await pb.collection('purchase_orders').getFullList({
-                filter: `order_date >= "${startDate}" && order_date <= "${endDate} 23:59:59"`,
-                expand: 'supplier,created_by',
+                filter,
+                expand: 'supplier,created_by,location',
                 sort: '-order_date',
                 requestKey: null
             });
@@ -188,6 +248,7 @@ export function Reports() {
                 total: po.total,
                 status: po.status,
                 created_by: po.expand?.created_by?.name || 'N/A',
+                location: po.expand?.location?.name || 'N/A',
             }));
 
             // Summary
@@ -238,7 +299,8 @@ export function Reports() {
             ]);
             // Summary row
             rows.push(['', '', '', '', '', '', `Total: $${summaryData.totalSales.toFixed(2)}`, '']);
-            title = `Sales Report (${startDate} to ${endDate})`;
+            const locName = activeLocation === 'all' ? 'All Locations' : activeLocation?.name;
+            title = `Sales Report (${startDate} to ${endDate}) - ${locName}`;
             filename = `sales-report-${startDate}-${endDate}`;
         } else if (generatedType === 'inventory') {
             headers = ['SKU', 'Product Name', 'Category', 'Stock', 'Reorder', 'Cost', 'Price', 'Value', 'Status'];
@@ -254,10 +316,11 @@ export function Reports() {
                 r.status
             ]);
             rows.push(['', '', '', '', '', '', '', `Total: $${summaryData.totalValue.toFixed(2)}`, '']);
-            title = `Inventory Report (${format(new Date(), 'MMM dd, yyyy')})`;
+            const locName = activeLocation === 'all' ? 'All Locations' : activeLocation?.name;
+            title = `Inventory Report (${format(new Date(), 'MMM dd, yyyy')}) - ${locName}`;
             filename = `inventory-report-${format(new Date(), 'yyyy-MM-dd')}`;
         } else if (generatedType === 'purchase') {
-            headers = ['Date', 'PO #', 'Supplier', 'Expected', 'Total', 'Status', 'Created By'];
+            headers = ['Date', 'PO #', 'Supplier', 'Expected', 'Total', 'Status', 'Created By', 'Location'];
             rows = reportData.map(r => [
                 format(new Date(r.date), 'MMM dd, yyyy'),
                 r.po_number,
@@ -265,9 +328,11 @@ export function Reports() {
                 r.expected_date ? format(new Date(r.expected_date), 'MMM dd, yyyy') : '-',
                 `$${r.total.toFixed(2)}`,
                 r.status.toUpperCase(),
-                r.created_by
+                r.created_by,
+                r.location
             ]);
-            title = `Purchase Orders Report (${startDate} to ${endDate})`;
+            const locName = activeLocation === 'all' ? 'All Locations' : activeLocation?.name;
+            title = `Purchase Orders Report (${startDate} to ${endDate}) - ${locName}`;
             filename = `po-report-${startDate}-${endDate}`;
         }
 
@@ -282,8 +347,17 @@ export function Reports() {
     return (
         <div className="space-y-6 max-w-[1600px] mx-auto pb-20">
             <div>
-                <h2 className="text-2xl font-heading font-bold text-text-main">Reports & Analytics</h2>
-                <p className="text-text-muted">Generate and export business reports</p>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h2 className="text-2xl font-heading font-bold text-text-main">Reports & Analytics</h2>
+                        <p className="text-text-muted">Generate and export business reports</p>
+                    </div>
+                    {activeLocation && (
+                        <div className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium border border-indigo-100">
+                            Viewing: {activeLocation === 'all' ? 'All Locations' : activeLocation.name}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Controls Section */}
@@ -360,8 +434,8 @@ export function Reports() {
                         <div className="flex-1 flex items-center p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100">
                             <Package size={20} className="mr-3" />
                             <div>
-                                <p className="font-medium">Current Stock Snapshot</p>
-                                <p className="text-xs opacity-80">This report displays real-time inventory levels and values. Date filtering is not applicable.</p>
+                                <p className="font-medium">Current Stock Snapshot ({activeLocation === 'all' ? 'All Locations' : activeLocation?.name})</p>
+                                <p className="text-xs opacity-80">This report displays real-time inventory levels for the active location.</p>
                             </div>
                         </div>
                     )}
@@ -370,7 +444,7 @@ export function Reports() {
                     <div className="flex gap-3">
                         <button
                             onClick={handleGenerate}
-                            disabled={isGenerating}
+                            disabled={isGenerating || !activeLocation}
                             className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/20"
                         >
                             {isGenerating ? (

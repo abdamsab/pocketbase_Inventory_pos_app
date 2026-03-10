@@ -13,16 +13,28 @@ export interface InventoryEntry extends RecordModel {
     updated: string;
 }
 
+import { useLocation } from '../contexts/LocationContext';
+
 export function useInventoryEntries() {
+    const { activeLocation } = useLocation();
+
     return useQuery({
-        queryKey: ['inventory-entries'],
+        queryKey: ['inventory-entries', activeLocation === 'all' ? 'all' : activeLocation?.id],
         queryFn: async () => {
+            if (!activeLocation) return [];
+
+            let filter = '';
+            if (activeLocation !== 'all') {
+                filter = `location="${activeLocation.id}"`;
+            }
+
             const result = await pb.collection('inventory_entries').getList<InventoryEntry>(1, 100, {
                 sort: '-created',
-                expand: 'product,location',
-                fields: '*',
+                expand: 'product,location,user',
+                filter: filter,
             });
             return result.items;
         },
+        enabled: !!activeLocation,
     });
 }

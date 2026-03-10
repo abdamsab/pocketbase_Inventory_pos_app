@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import { pbValidated } from '../lib/pocketbase';
-import type { User } from '../types';
+import { pbValidated, pb } from '../lib/pocketbase';
+import type { User, Location } from '../types';
 
 interface AuthState {
     user: User | null;
+    activeLocation: Location | null; // New: actively selected location
     isValid: boolean;
     isLoading: boolean;
     isInitialized: boolean; // New: tracks if initial auth check is complete
@@ -13,6 +14,7 @@ interface AuthState {
     logout: () => Promise<void>;
     refresh: () => Promise<void>;
     validateAuth: () => Promise<void>; // New: validate current auth state
+    setActiveLocation: (location: Location) => void; // New: Switch location
     clearError: () => void;
 }
 
@@ -23,6 +25,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     return {
         user: initialUser,
+        activeLocation: null, // Initialize as null, will need to be set
         isValid: initialValid,
         isLoading: false,
         isInitialized: initialValid, // If we start with valid auth, we're already initialized
@@ -43,14 +46,37 @@ export const useAuthStore = create<AuthState>((set, get) => {
                 const authResult = await pbValidated.authWithPassword(email, password);
 
                 // Update state manually to ensure consistency (onChange will also trigger)
+                // Update state manually to ensure consistency (onChange will also trigger)
                 set({
-                    user: authResult.record,
+                    user: authResult.record as unknown as User,
                     isValid: true,
                     isLoading: false,
                     error: null,
                     lastActivity: Date.now(),
                     isInitialized: true
                 });
+
+                // Fetch and set default location
+                try {
+                    const user = authResult.record as User;
+                    if (user.locations && user.locations.length > 0) {
+                        // Fetch the first location details
+                        const firstLocationId = user.locations[0];
+                        const location = await pb.collection('locations').getOne(firstLocationId);
+                        get().setActiveLocation(location as Location);
+                    } else if (user.role === 'admin' || user.superuser) {
+                        // If admin/super has no location, maybe fetch all and set first?
+                        // For now, let's leave it null and let UI prompt or fetch main.
+                        // Ideally we fetch the "Main Store"
+                        const locations = await pb.collection('locations').getList(1, 1, { sort: 'created' }); // get oldest
+                        if (locations.items.length > 0) {
+                            get().setActiveLocation(locations.items[0] as Location);
+                        }
+                    }
+                } catch (locError) {
+                    console.error("Failed to set default location on login:", locError);
+                }
+
 
                 console.log('Login successful for user:', authResult.record.email);
 
@@ -184,6 +210,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
                     error: null
                 });
             }
+        },
+
+        setActiveLocation: (location: Location) => {
+            set({ activeLocation: location });
+            // Optionally persist to localStorage if needed, or rely on re-fetch
+            localStorage.setItem('active_location_id', location.id);
         },
 
         clearError: () => {

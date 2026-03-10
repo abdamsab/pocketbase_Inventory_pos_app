@@ -2,18 +2,25 @@ import { useQuery } from '@tanstack/react-query';
 import { pb } from '../../lib/pocketbase';
 import { Calendar, User, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAuthStore } from '../../stores/authStore';
 
 export function SalesHistory() {
+    const { activeLocation } = useAuthStore();
+
     const { data: sales, isLoading } = useQuery({
-        queryKey: ['sales'],
+        queryKey: ['sales', activeLocation?.id],
         queryFn: async () => {
+            if (!activeLocation) return [];
+
             const result = await pb.collection('sales').getList(1, 100, {
                 sort: '-created', // Sort by created date (most recent first)
+                filter: `location="${activeLocation.id}"`,
                 expand: 'user',
                 fields: '*', // Request all fields including system fields
             });
             return result.items;
         },
+        enabled: !!activeLocation
     });
 
     // Sales history displays properly with created/updated fields added to schema

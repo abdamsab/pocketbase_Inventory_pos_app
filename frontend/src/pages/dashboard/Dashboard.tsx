@@ -5,7 +5,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { format } from 'date-fns';
 import { useState, useEffect } from 'react';
 import { useRealtimeDashboard } from '../../hooks/useRealtimeSubscription';
+import { useAuthStore } from '../../stores/authStore';
+import { useLocation } from '../../contexts/LocationContext';
 import { DashboardSkeleton, EmptySales } from '../../components/common/LoadingStates';
+
+import { LowStockList } from './components/LowStockList';
 
 const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
     <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 group relative overflow-hidden">
@@ -46,36 +50,65 @@ export function Dashboard() {
         return () => clearInterval(timer);
     }, []);
 
+    const { user } = useAuthStore();
+    const { activeLocation } = useLocation();
+
     const { data: stats, isLoading, error } = useQuery({
-        queryKey: ['dashboard-stats'],
+        queryKey: ['dashboard-stats', activeLocation === 'all' ? 'all' : activeLocation?.id],
         queryFn: async () => {
+            if (!activeLocation) return null;
+
             let sales: any[] = [];
-            let products: any[] = [];
-            let users: any[] = [];
+            let inventoryItems: any[] = [];
+            let locationUsers: any[] = [];
+
+            // Helper to build filter string
+            // If activeLocation is 'all', we typically want ALL data, assuming permission allows.
+            // If user is Admin/Superuser, no filter needed for 'all'.
+            // If user is Multi-location Manager, 'all' means 'id in [locations]'.
+
+            const locationFilter = activeLocation === 'all'
+                ? (user?.superuser ? '' : user?.locations?.map((id: string) => `location="${id}"`).join(' || ') || 'location=""') // Fallback if no locations
+                : `location="${activeLocation.id}"`;
 
             try {
+                // Fetch sales
+                // Note: If filter is empty string (superuser all), it fetches everything.
                 sales = await pb.collection('sales').getFullList({
                     sort: '-created',
-                    limit: 100,
+                    filter: locationFilter,
+                    limit: 100, // Limit for recent sales list
                 });
             } catch (e) {
                 console.warn('Failed to fetch sales data', e);
             }
 
             try {
-                products = await pb.collection('products').getFullList();
+                // Fetch inventory
+                inventoryItems = await pb.collection('inventory').getFullList({
+                    filter: locationFilter,
+                    expand: 'product,location'
+                });
             } catch (e) {
-                console.warn('Failed to fetch products data', e);
+                console.warn('Failed to fetch inventory data', e);
             }
 
             try {
-                users = await pb.collection('users').getFullList();
+                // Active Users - simple count for now
+                locationUsers = await pb.collection('users').getFullList();
             } catch (e) {
                 console.warn('Failed to fetch users data', e);
             }
 
             const totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
-            const lowStockProducts = products.filter(p => p.stock <= (p.reorder_point || 5));
+
+            // Calculate low stock
+            const lowStockItems = inventoryItems
+                .filter(item => item.quantity <= (item.reorder_point || 10))
+                .sort((a, b) => a.quantity - b.quantity) // Lowest stock first
+                .slice(0, 10); // Top 10
+
+            const lowStockCount = inventoryItems.filter(item => item.quantity <= (item.reorder_point || 10)).length;
 
             // Get recent sales (last 5)
             const recentSales = sales.slice(0, 5).map(sale => ({
@@ -83,7 +116,7 @@ export function Dashboard() {
                 formattedDate: format(new Date(sale.created), 'MMM dd, HH:mm')
             }));
 
-            // Get sales by day for chart (last 7 days)
+            // Get sales by day (last 7 days)
             const salesByDay: Record<string, number> = {};
             const last7Days = Array.from({ length: 7 }, (_, i) => {
                 const date = new Date();
@@ -110,14 +143,16 @@ export function Dashboard() {
             return {
                 totalRevenue,
                 totalSales: sales.length,
-                lowStockCount: lowStockProducts.length,
-                totalProducts: products.length,
-                totalUsers: users.length,
+                lowStockCount,
+                lowStockItems, // New data
+                totalProducts: inventoryItems.length,
+                totalUsers: locationUsers.length,
                 recentSales,
                 chartData,
             };
         },
-        refetchInterval: 30000, // Refresh every 30 seconds
+        enabled: !!activeLocation,
+        refetchInterval: 30000,
     });
 
     if (isLoading) return <DashboardSkeleton />;
@@ -144,11 +179,10 @@ export function Dashboard() {
                         ) : (
                             <WifiOff className="w-4 h-4 text-yellow-500" />
                         )}
-                        <span className={`text-xs font-medium ${
-                            realtimeUpdates.isConnected
-                                ? 'text-green-600'
-                                : 'text-yellow-600'
-                        }`}>
+                        <span className={`text-xs font-medium ${realtimeUpdates.isConnected
+                            ? 'text-green-600'
+                            : 'text-yellow-600'
+                            }`}>
                             {realtimeUpdates.isConnected
                                 ? 'Real-time Active'
                                 : 'Real-time Offline'}
@@ -220,26 +254,38 @@ export function Dashboard() {
                     </ResponsiveContainer>
                 </div>
 
-                {/* Recent Sales */}
-                <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg">
-                    <h3 className="text-lg font-semibold text-text-main mb-4">Recent Sales</h3>
-                    <div className="space-y-3">
-                        {stats?.recentSales && stats.recentSales.length > 0 ? (
-                            stats.recentSales.map((sale: any) => (
-                                <div key={sale.id} className="flex justify-between items-center p-3 bg-surfaceHighlight rounded-lg hover:bg-surfaceHighlight/80 transition-colors">
-                                    <div>
-                                        <p className="font-medium text-text-main text-sm">{sale.sale_number}</p>
-                                        <p className="text-xs text-text-muted">{sale.formattedDate}</p>
+                {/* Right Column Stack */}
+                <div className="space-y-6">
+                    {/* Low Stock Widget */}
+                    <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-text-main">Attention Needed</h3>
+                            <span className="text-xs font-medium text-danger bg-danger/10 px-2 py-1 rounded-full">{stats?.lowStockCount} items</span>
+                        </div>
+                        <LowStockList items={stats?.lowStockItems || []} />
+                    </div>
+
+                    {/* Recent Sales */}
+                    <div className="bg-surface border border-border rounded-2xl p-6 shadow-lg">
+                        <h3 className="text-lg font-semibold text-text-main mb-4">Recent Sales</h3>
+                        <div className="space-y-3">
+                            {stats?.recentSales && stats.recentSales.length > 0 ? (
+                                stats.recentSales.map((sale: any) => (
+                                    <div key={sale.id} className="flex justify-between items-center p-3 bg-surfaceHighlight rounded-lg hover:bg-surfaceHighlight/80 transition-colors">
+                                        <div>
+                                            <p className="font-medium text-text-main text-sm">{sale.sale_number}</p>
+                                            <p className="text-xs text-text-muted">{sale.formattedDate}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="font-semibold text-primary">${sale.total.toFixed(2)}</p>
+                                            <p className="text-xs text-text-muted capitalize">{sale.payment_method}</p>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="font-semibold text-primary">${sale.total.toFixed(2)}</p>
-                                        <p className="text-xs text-text-muted capitalize">{sale.payment_method}</p>
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <EmptySales />
-                        )}
+                                ))
+                            ) : (
+                                <EmptySales />
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

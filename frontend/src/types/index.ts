@@ -19,6 +19,8 @@ export type PurchaseOrderItem = z.infer<typeof ValidationSchemas.PurchaseOrderIt
 export type StockAdjustment = z.infer<typeof ValidationSchemas.StockAdjustment> & RecordModel;
 export type Settings = z.infer<typeof ValidationSchemas.Settings> & RecordModel;
 export type Receipt = z.infer<typeof ValidationSchemas.Receipt> & RecordModel;
+export type Customer = z.infer<typeof ValidationSchemas.Customer> & RecordModel;
+export type Inventory = z.infer<typeof ValidationSchemas.Inventory> & RecordModel;
 
 // List response types for pagination
 export type ListResponse<T> = {

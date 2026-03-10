@@ -18,8 +18,12 @@ import { PurchaseOrderForm } from './pages/purchase-orders/PurchaseOrderForm';
 import { PurchaseOrderView } from './pages/purchase-orders/PurchaseOrderView';
 import { Reports } from './pages/reports/Reports';
 import { AdvancedAnalytics } from './pages/reports/AdvancedAnalytics';
+import { InventoryList } from './pages/inventory/InventoryList';
 import { InventoryEntriesList } from './pages/inventory/InventoryEntriesList';
+import { StockTransfer } from './pages/inventory/StockTransfer';
 import { SalesItemsList } from './pages/sales/SalesItemsList';
+
+import { LocationProvider } from './contexts/LocationContext';
 
 console.log('🎯 App.tsx: App component rendering...');
 
@@ -31,7 +35,11 @@ function App() {
         <Route path="/login" element={<Login />} />
 
         <Route element={<ProtectedRoute />}>
-          <Route element={<AppShell />}>
+          <Route element={
+            <LocationProvider>
+              <AppShell />
+            </LocationProvider>
+          }>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/pos" element={<POS />} />
@@ -44,7 +52,9 @@ function App() {
             <Route path="/purchase-orders/:id" element={<PurchaseOrderView />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/reports/advanced-analytics" element={<AdvancedAnalytics />} />
+            <Route path="/inventory" element={<InventoryList />} />
             <Route path="/inventory-entries" element={<InventoryEntriesList />} />
+            <Route path="/inventory/transfer" element={<StockTransfer />} />
             <Route path="/sales-items" element={<SalesItemsList />} />
             <Route path="/categories" element={<CategoryList />} />
             <Route path="/locations" element={<LocationList />} />

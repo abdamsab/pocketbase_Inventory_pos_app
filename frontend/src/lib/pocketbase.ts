@@ -28,6 +28,7 @@ interface SaleCreateData {
   sale_number: string;
   user: string;
   location?: string;
+  customer?: string; // Add customer relation
   subtotal: number;
   tax?: number;
   discount?: number;
@@ -35,8 +36,8 @@ interface SaleCreateData {
   payment_method: 'cash' | 'card' | 'mobile' | 'bank_transfer';
   status?: 'completed' | 'refunded' | 'cancelled';
   notes?: string;
-  created?: string;  // Add timestamp fields
-  updated?: string;  // Add timestamp fields
+  created?: string;
+  updated?: string;
 }
 
 interface PurchaseOrderCreateData {

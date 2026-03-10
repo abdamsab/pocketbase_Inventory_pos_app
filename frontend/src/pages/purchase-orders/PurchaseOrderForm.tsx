@@ -67,11 +67,11 @@ export function PurchaseOrderForm() {
                 po_number: generatePONumber(),
                 supplier: formData.supplier,
                 order_date: formData.order_date,
-                expected_date: formData.expected_date || undefined,
-                received_date: undefined,
+                ...(formData.expected_date && { expected_date: formData.expected_date }),
+
                 status: 'draft' as const,
                 total: calculateTotal(),
-                notes: formData.notes,
+                ...(formData.notes && { notes: formData.notes }),
                 created_by: user?.id || '',
             };
 

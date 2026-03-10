@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Settings, LogOut, Store, User as UserIcon, Building2, FileText, TrendingUp, Tag, MapPin, Database, Receipt } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Settings, LogOut, Store, User as UserIcon, Building2, FileText, TrendingUp, Tag, MapPin, Database, Receipt, ArrowLeftRight } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import clsx from 'clsx';
 
@@ -15,7 +15,9 @@ export function Sidebar() {
         { to: '/sales-items', icon: Receipt, label: 'Sales Items' },
         // Categories (admin/manager only)
         ...(user?.role === 'admin' || user?.role === 'manager' ? [{ to: '/categories', icon: Tag, label: 'Categories' }] : []),
-        { to: '/products', icon: Package, label: 'Inventory' },
+        { to: '/products', icon: Package, label: 'Products' },
+        { to: '/inventory', icon: Database, label: 'Inventory' },
+        { to: '/inventory/transfer', icon: ArrowLeftRight, label: 'Stock Transfer' },
         { to: '/inventory-entries', icon: Database, label: 'Inventory History' },
         { to: '/purchase-orders', icon: ShoppingCart, label: 'Purchase Orders' },
         // Locations (admin/manager only)

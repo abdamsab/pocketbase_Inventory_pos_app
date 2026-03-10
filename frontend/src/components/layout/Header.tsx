@@ -1,13 +1,15 @@
 import { useAuthStore } from '../../stores/authStore';
 import { useThemeStore } from '../../stores/themeStore';
-import { Bell, Search, User, Sun, Moon } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { Bell, Search, User, Sun, Moon, MapPin, ChevronDown } from 'lucide-react';
+import { useLocation as useRouterLocation } from 'react-router-dom';
+import { useLocation } from '../../contexts/LocationContext';
 import { useEffect } from 'react';
 
 export function Header() {
     const { user } = useAuthStore();
     const { theme, toggleTheme } = useThemeStore();
-    const location = useLocation();
+    const location = useRouterLocation();
+    const { activeLocation, availableLocations, switchLocation, isLoading: isLoadingLocations } = useLocation();
 
     // Initialize theme on mount
     useEffect(() => {
@@ -42,6 +44,49 @@ export function Header() {
 
             {/* Right Actions */}
             <div className="flex items-center gap-6">
+
+                {/* Location Switcher */}
+                {!isLoadingLocations && availableLocations.length > 0 && (
+                    <div className="relative group">
+                        <button className="flex items-center gap-2 px-3 py-1.5 bg-surfaceHighlight/50 hover:bg-surfaceHighlight rounded-lg transition-colors border border-border">
+                            <MapPin size={16} className="text-primary" />
+                            <div className="text-left hidden sm:block">
+                                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider leading-none">Location</p>
+                                <p className="text-sm font-semibold text-text-main leading-tight truncate max-w-[120px]">
+                                    {activeLocation === 'all' ? 'All Locations' : activeLocation?.name || 'Select Location'}
+                                </p>
+                            </div>
+                            <ChevronDown size={14} className="text-text-muted" />
+                        </button>
+
+                        {/* Dropdown */}
+                        <div className="absolute top-full right-0 mt-2 w-56 bg-surface border border-border rounded-xl shadow-xl shadow-black/5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 overflow-hidden transform group-hover:translate-y-0 translate-y-2">
+                            <div className="py-1">
+                                {(user?.superuser || availableLocations.length > 1) && (
+                                    <button
+                                        onClick={() => switchLocation('all')}
+                                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-primary/5 transition-colors flex items-center justify-between group/item ${activeLocation === 'all' ? 'bg-primary/5 text-primary font-medium' : 'text-text-main'}`}
+                                    >
+                                        <span>All Locations</span>
+                                        {activeLocation === 'all' && <div className="w-2 h-2 rounded-full bg-primary"></div>}
+                                    </button>
+                                )}
+
+                                {availableLocations.map(loc => (
+                                    <button
+                                        key={loc.id}
+                                        onClick={() => switchLocation(loc.id)}
+                                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-primary/5 transition-colors flex items-center justify-between group/item ${activeLocation !== 'all' && activeLocation?.id === loc.id ? 'bg-primary/5 text-primary font-medium' : 'text-text-main'}`}
+                                    >
+                                        <span>{loc.name}</span>
+                                        {activeLocation !== 'all' && activeLocation?.id === loc.id && <div className="w-2 h-2 rounded-full bg-primary"></div>}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Theme Toggle */}
                 <button
                     onClick={toggleTheme}

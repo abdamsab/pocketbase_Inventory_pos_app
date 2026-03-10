@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCategories } from '../../hooks/useCategories';
 import { useProducts, useAddToInventory } from '../../hooks/useProducts';
+import { useLocation } from '../../contexts/LocationContext';
+import { useAuthStore } from '../../stores/authStore';
 import { X, Upload, Loader2 } from 'lucide-react';
 import { pb } from '../../lib/pocketbase';
 import type { Product } from '../../types';
@@ -22,11 +24,14 @@ export function ProductForm({ product, mode = 'create', onClose, onSuccess }: Pr
     const [error, setError] = useState('');
     const [creating, setCreating] = useState(false);
     const [selectedProductId, setSelectedProductId] = useState<string>('');
+    const { availableLocations } = useLocation();
+    const { user } = useAuthStore();
 
     const [formData, setFormData] = useState({
         name: '',
         sku: '',
         category: '',
+        location: '',
         cost_price: '',
         sale_price: '',
         stock: '',
@@ -44,6 +49,7 @@ export function ProductForm({ product, mode = 'create', onClose, onSuccess }: Pr
                     name: selectedProduct.name,
                     sku: selectedProduct.sku,
                     category: selectedProduct.category || '',
+                    location: formData.location, // Preserve existing location selection
                     cost_price: selectedProduct.cost_price.toString(),
                     sale_price: selectedProduct.sale_price.toString(),
                     stock: '0', // Reset stock for additional quantity input
@@ -58,6 +64,7 @@ export function ProductForm({ product, mode = 'create', onClose, onSuccess }: Pr
                 name: product.name,
                 sku: product.sku,
                 category: product.category || '',
+                location: formData.location, // Preserve or empty
                 cost_price: product.cost_price.toString(),
                 sale_price: product.sale_price.toString(),
                 stock: product.stock.toString(),
@@ -284,6 +291,26 @@ export function ProductForm({ product, mode = 'create', onClose, onSuccess }: Pr
                                 </select>
                             </div>
 
+                            {/* Location field - required for create/add-stock modes */}
+                            {(mode === 'create' || mode === 'add-stock') && (
+                                <div>
+                                    <label className="block text-sm font-medium text-text-main mb-2">Location *</label>
+                                    <select
+                                        required
+                                        value={formData.location}
+                                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                                        className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-text-main focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none"
+                                    >
+                                        <option value="">Select Location</option>
+                                        {availableLocations?.map((location) => (
+                                            <option key={location.id} value={location.id}>
+                                                {location.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
                             {/* Stock field - readonly for edit-pricing mode */}
                             <div>
                                 <label className="block text-sm font-medium text-text-main mb-2">
@@ -410,9 +437,9 @@ export function ProductForm({ product, mode = 'create', onClose, onSuccess }: Pr
                                 </>
                             ) : (
                                 mode === 'create' ? 'Create Product' :
-                                mode === 'add-stock' ? 'Add Product' :
-                                mode === 'edit-pricing' ? 'Update Product' :
-                                'Save Product'
+                                    mode === 'add-stock' ? 'Add Product' :
+                                        mode === 'edit-pricing' ? 'Update Product' :
+                                            'Save Product'
                             )}
                         </button>
                     </div>

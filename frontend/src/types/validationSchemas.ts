@@ -9,13 +9,19 @@ const BaseRecordSchema = z.object({
   updated: z.string().optional(), // Make fully optional to handle invalid datetime data
 });
 
-// User/Auth schemas
+// User/Auth schemas - only authentication data
 export const UserRecordSchema = BaseRecordSchema.extend({
   email: z.string().email(),
   emailVisibility: z.boolean(),
   name: z.string().min(1),
   avatar: z.string().optional(),
   role: z.enum(["admin", "manager", "cashier"]),
+  locations: z.preprocess((val) => {
+    if (Array.isArray(val)) return val;
+    if (typeof val === 'string') return val ? [val] : [];
+    return [];
+  }, z.array(z.string())).default([]),
+  superuser: z.boolean().default(false),
 });
 
 export const AuthResponseSchema = z.object({
@@ -41,8 +47,8 @@ export const ProductSchema = BaseRecordSchema.extend({
   category: z.string().optional(), // relation ID
   cost_price: z.number().min(0),
   sale_price: z.number().min(0),
-  stock: z.number().min(0).default(0),
-  reorder_point: z.number().min(0).optional(),
+  stock: z.number().optional(), // Deprecated: use inventory collection
+  reorder_point: z.number().optional(), // Deprecated: use inventory collection
   image: z.string().optional(),
   is_active: z.boolean().default(true),
 });
@@ -54,12 +60,15 @@ export const SaleItemSchema = BaseRecordSchema.extend({
   quantity: z.number().min(1),
   unit_price: z.number().min(0),
   total: z.number().min(0),
+  location: z.string(), // relation ID
+  user: z.string(), // relation ID
 });
 
 export const SaleSchema = BaseRecordSchema.extend({
   sale_number: z.string().min(1),
   user: z.string(), // relation ID
-  location: z.string().optional(), // relation ID
+  location: z.string(), // relation ID (Required now)
+  customer: z.string().optional(), // relation ID
   subtotal: z.number().min(0),
   tax: z.number().min(0).default(0),
   discount: z.number().min(0).default(0),
@@ -81,6 +90,16 @@ export const SupplierSchema = BaseRecordSchema.extend({
   active: z.boolean().default(true),
 });
 
+// Customer schemas
+export const CustomerSchema = BaseRecordSchema.extend({
+  name: z.string().min(1),
+  email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  total_spent: z.number().min(0).default(0),
+  last_visit: z.string().optional(), // Datetime string
+});
+
 // Purchase Order schemas
 export const PurchaseOrderItemSchema = BaseRecordSchema.extend({
   purchase_order: z.string(), // relation ID
@@ -94,6 +113,7 @@ export const PurchaseOrderItemSchema = BaseRecordSchema.extend({
 export const PurchaseOrderSchema = BaseRecordSchema.extend({
   po_number: z.string().min(1),
   supplier: z.string(), // relation ID
+  location: z.string(), // relation ID
   order_date: z.string().datetime(),
   expected_date: z.string().datetime().optional(),
   status: z.enum(["draft", "sent", "partial", "received", "cancelled"]),
@@ -105,11 +125,19 @@ export const PurchaseOrderSchema = BaseRecordSchema.extend({
 // Inventory schemas
 export const InventoryEntrySchema = BaseRecordSchema.extend({
   product: z.string(), // relation ID
-  location: z.string().optional(), // relation ID
-  type: z.enum(["purchase", "sale", "adjustment", "transfer"]),
+  location: z.string(), // relation ID
+  user: z.string(), // relation ID
+  type: z.enum(["purchase", "sale", "adjustment", "transfer", "transfer_in", "transfer_out"]),
   quantity: z.number(),
   reference_id: z.string().optional(),
   notes: z.string().optional(),
+});
+
+export const InventorySchema = BaseRecordSchema.extend({
+  product: z.string(),
+  location: z.string(),
+  quantity: z.number(),
+  reorder_point: z.number().min(0).default(10),
 });
 
 // Location schemas
@@ -117,6 +145,7 @@ export const LocationSchema = BaseRecordSchema.extend({
   name: z.string().min(1),
   address: z.string().optional(),
   code: z.string().min(1),
+  type: z.enum(["store", "warehouse"]).default("store"),
   timezone: z.string().default("Africa/Lagos"),
   tax_rate: z.number().min(0).default(0),
 });
@@ -203,4 +232,6 @@ export const ValidationSchemas = {
   BatchRequest: BatchRequestSchema,
   BatchResponse: BatchResponseSchema,
   FileUploadResponse: FileUploadResponseSchema,
+  Inventory: InventorySchema,
+  Customer: CustomerSchema,
 } as const;
